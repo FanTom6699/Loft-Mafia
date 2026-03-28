@@ -1117,12 +1117,16 @@ async def process_day_end(bot: Bot, chat_id: int, timer_reason: str | None = Non
 
         if room.day_stage == DAY_STAGE_NOMINATION:
             ok, candidate_id = room.resolve_day_nomination()
+            print(f"[PHASE] process_day_end: nomination resolved for chat_id={chat_id}, ok={ok}, candidate_id={candidate_id}")
             if not ok:
+                print(f"[PHASE] process_day_end: nomination resolve failed for chat_id={chat_id}")
                 await bot.send_message(chat_id, "Не удалось обработать выбор кандидата.")
                 return
 
             if candidate_id is None:
+                print(f"[PHASE] process_day_end: no single candidate selected, ending day without lynch for chat_id={chat_id}")
                 ok_end, info_end = room.end_day_no_lynch()
+                print(f"[PHASE] process_day_end: end_day_no_lynch result for chat_id={chat_id}, ok_end={ok_end}, info={info_end}")
                 if ok_end:
                     await bot.send_message(chat_id, "Сегодня решили никого не вешать.")
                     await send_phase_media(bot, chat_id, room.night_media_caption(), NIGHT_IMAGE_PATH)
@@ -1137,12 +1141,14 @@ async def process_day_end(bot: Bot, chat_id: int, timer_reason: str | None = Non
                     await push_phase_action_menus(bot, room)
                     await start_phase_timer(room, bot)
                     persist_room(room)
+                    print(f"[PHASE] process_day_end: transitioned to night after no-lynch for chat_id={chat_id}")
                 else:
                     await bot.send_message(chat_id, info_end)
                 return
 
             candidate = room.get_player(candidate_id)
             if candidate is None:
+                print(f"[PHASE] process_day_end: candidate_id={candidate_id} not found, forcing no-lynch for chat_id={chat_id}")
                 await bot.send_message(chat_id, "Кандидат не найден. День завершается без повешения.")
                 ok_end, _ = room.end_day_no_lynch()
                 if ok_end:
@@ -1156,9 +1162,11 @@ async def process_day_end(bot: Bot, chat_id: int, timer_reason: str | None = Non
                     await push_phase_action_menus(bot, room)
                     await start_phase_timer(room, bot)
                     persist_room(room)
+                    print(f"[PHASE] process_day_end: transitioned to night after missing candidate fallback for chat_id={chat_id}")
                 return
 
             room.start_day_trial(candidate.user_id)
+            print(f"[PHASE] process_day_end: trial started for chat_id={chat_id}, candidate_id={candidate.user_id}, candidate_name={candidate.full_name}")
             persist_room(room)
             await bot.send_message(
                 chat_id,
@@ -1170,12 +1178,15 @@ async def process_day_end(bot: Bot, chat_id: int, timer_reason: str | None = Non
             await push_trial_vote_menus(bot, room, candidate.full_name)
             await bot.send_message(chat_id, f"Время голосования за/против: {DAY_TRIAL_SECONDS} сек.")
             await start_phase_timer(room, bot)
+            print(f"[PHASE] process_day_end: trial menus sent and timer started for chat_id={chat_id}")
             return
 
         if room.day_stage == DAY_STAGE_TRIAL:
             yes_count, no_count = room.trial_vote_counts()
+            print(f"[PHASE] process_day_end: resolving trial for chat_id={chat_id}, yes_count={yes_count}, no_count={no_count}, votes={room.trial_votes}")
             ok, info, eliminated, don_transfer_note, don_successor_id = room.resolve_day_trial()
             if not ok:
+                print(f"[PHASE] process_day_end: trial resolve failed for chat_id={chat_id}, info={info}")
                 await bot.send_message(chat_id, info)
                 return
             await bot.send_message(chat_id, f"Итоги голосования: за {yes_count}, против {no_count}.")
@@ -1859,13 +1870,28 @@ async def on_trial_callback(callback: CallbackQuery) -> None:
         return
     persist_room(room)
 
+    # Update DM menu after vote
     yes_count, no_count = room.trial_vote_counts()
     try:
         await callback.message.edit_reply_markup(reply_markup=trial_vote_keyboard(chat_id, yes_count, no_count))
     except Exception:
         pass
 
-    await maybe_finish_phase_early(callback.bot, room)
+    # Send group message about the vote
+    voter = room.get_player(callback.from_user.id)
+    candidate = room.get_player(room.trial_candidate_id) if room.trial_candidate_id is not None else None
+    if voter and candidate:
+        vote_text = "ЗА" if approve else "ПРОТИВ"
+        await callback.bot.send_message(
+            room.chat_id,
+            f"🗳️ {voter.full_name} проголосовал {vote_text} казни {candidate.full_name}"
+        )
+
+    # If all have voted, proceed to next phase
+    if room.all_alive_trial_voted():
+        await process_day_end(callback.bot, room.chat_id, timer_reason="⚡ Все дневные голоса получены. День завершается досрочно.")
+    else:
+        await maybe_finish_phase_early(callback.bot, room)
 
 
 @router.callback_query(F.data.startswith("act:"))
