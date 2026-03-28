@@ -1093,10 +1093,23 @@ class GameRoom:
             "🤵🏻 Мафия выбирает жертву..."
         )
 
+    def night_media_caption(self) -> str:
+        return (
+            "🌙 Наступает ночь\n"
+            "На улицах города становится опасно.\n"
+            "Роли делают ночные ходы в ЛС бота."
+        )
+
     def day_intro_text(self) -> str:
         return (
             f"🏙 День {self.round_no}\n"
             "Солнце всходит, подсушивая на тротуарах пролитую ночью кровь..."
+        )
+
+    def day_media_caption(self) -> str:
+        return (
+            f"☀️ Наступает день {self.round_no}\n"
+            "Город просыпается и обсуждает события ночи."
         )
 
     def status_text(self) -> str:

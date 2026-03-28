@@ -114,6 +114,31 @@ def clear_action_menu_messages(chat_id: int) -> None:
     action_menu_messages.pop(chat_id, None)
 
 
+def resolve_phase_image_path(image_path: str | None) -> str | None:
+    if not image_path:
+        return None
+    if os.path.exists(image_path):
+        return image_path
+
+    base_dir = os.path.dirname(image_path) or "."
+    stem = os.path.splitext(os.path.basename(image_path))[0].lower()
+
+    aliases_by_stem = {
+        "day": ["day", "den", "d"],
+        "night": ["night", "nori", "noch", "n"],
+    }
+    aliases = aliases_by_stem.get(stem, [stem])
+    extensions = [".jpg", ".jpeg", ".png", ".webp"]
+
+    for alias in aliases:
+        for ext in extensions:
+            candidate = os.path.join(base_dir, f"{alias}{ext}")
+            if os.path.exists(candidate):
+                return candidate
+
+    return image_path
+
+
 async def send_phase_media(
     bot: Bot,
     chat_id: int,
@@ -121,6 +146,7 @@ async def send_phase_media(
     image_path: str | None,
     reply_markup: InlineKeyboardMarkup | None = None,
 ) -> None:
+    image_path = resolve_phase_image_path(image_path)
     if image_path and os.path.exists(image_path):
         try:
             await bot.send_photo(
@@ -277,15 +303,10 @@ async def launch_game_from_registration(bot: Bot, room, chat_id: int, chat_title
                 pass
 
     try:
-        await bot.send_message(chat_id, "🌙 Наступает ночь.")
-    except Exception:
-        pass
-
-    try:
-        await send_phase_media(bot, chat_id, room.night_intro_text(), NIGHT_IMAGE_PATH)
+        await send_phase_media(bot, chat_id, room.night_media_caption(), NIGHT_IMAGE_PATH)
     except Exception:
         try:
-            await bot.send_message(chat_id, room.night_intro_text())
+            await bot.send_message(chat_id, room.night_media_caption())
         except Exception:
             pass
 
@@ -939,15 +960,7 @@ async def process_night_end(bot: Bot, chat_id: int, timer_reason: str | None = N
             except Exception:
                 continue
 
-        if room.round_no == 1:
-            await send_phase_media(
-                bot,
-                chat_id,
-                "☀️ Первый день. Город просыпается и пытается понять, что произошло ночью.",
-                DAY_IMAGE_PATH,
-            )
-        else:
-            await send_phase_media(bot, chat_id, room.day_intro_text(), DAY_IMAGE_PATH)
+        await send_phase_media(bot, chat_id, room.day_media_caption(), DAY_IMAGE_PATH)
 
         if don_transfer_note:
             await announce_don_transfer(room, bot, don_successor_id)
@@ -1026,7 +1039,7 @@ async def process_day_end(bot: Bot, chat_id: int, timer_reason: str | None = Non
                 ok_end, info_end = room.end_day_no_lynch()
                 if ok_end:
                     await bot.send_message(chat_id, "Сегодня решили никого не вешать.")
-                    await send_phase_media(bot, chat_id, room.night_intro_text(), NIGHT_IMAGE_PATH)
+                    await send_phase_media(bot, chat_id, room.night_media_caption(), NIGHT_IMAGE_PATH)
                     keyboard = await night_action_keyboard(bot)
                     await bot.send_message(
                         chat_id,
@@ -1047,7 +1060,7 @@ async def process_day_end(bot: Bot, chat_id: int, timer_reason: str | None = Non
                 await bot.send_message(chat_id, "Кандидат не найден. День завершается без повешения.")
                 ok_end, _ = room.end_day_no_lynch()
                 if ok_end:
-                    await send_phase_media(bot, chat_id, room.night_intro_text(), NIGHT_IMAGE_PATH)
+                    await send_phase_media(bot, chat_id, room.night_media_caption(), NIGHT_IMAGE_PATH)
                     keyboard = await night_action_keyboard(bot)
                     await bot.send_message(
                         chat_id,
@@ -1112,7 +1125,7 @@ async def process_day_end(bot: Bot, chat_id: int, timer_reason: str | None = Non
                 persist_room(room)
                 return
 
-            await send_phase_media(bot, chat_id, room.night_intro_text(), NIGHT_IMAGE_PATH)
+            await send_phase_media(bot, chat_id, room.night_media_caption(), NIGHT_IMAGE_PATH)
             keyboard = await night_action_keyboard(bot)
             await bot.send_message(
                 chat_id,
