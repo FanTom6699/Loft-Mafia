@@ -286,18 +286,31 @@ async def launch_game_from_registration(bot: Bot, room, chat_id: int, chat_title
     except Exception:
         pass
 
-    for player in room.players.values():
-        try:
-            card_text = role_card_text(player.role, chat_title or room.chat_title or "Групповой чат")
-            if player.role in {ROLE_DON, ROLE_MAFIA}:
-                card_text += mafia_allies_text(room)
-            await bot.send_message(player.user_id, card_text)
-        except Exception:
+    async def send_role_cards() -> None:
+        async def send_one_role_card(player) -> tuple[str, bool]:
+            name = player_display_name(player)
+            try:
+                card_text = role_card_text(player.role, chat_title or room.chat_title or "Групповой чат")
+                if player.role in {ROLE_DON, ROLE_MAFIA}:
+                    card_text += mafia_allies_text(room)
+                await asyncio.wait_for(bot.send_message(player.user_id, card_text), timeout=8)
+                return name, True
+            except Exception:
+                return name, False
+
+        results = await asyncio.gather(
+            *(send_one_role_card(player) for player in room.players.values()),
+            return_exceptions=False,
+        )
+        failed_names = [name for name, ok in results if not ok]
+
+        if failed_names:
             try:
                 await bot.send_message(
                     chat_id,
-                    f"Не смог отправить роль {player.full_name}."
-                    " Пусть напишет боту /start в личке.",
+                    "Не смог отправить роли игрокам: "
+                    + ", ".join(failed_names)
+                    + ". Пусть напишут боту /start в личке.",
                 )
             except Exception:
                 pass
@@ -337,10 +350,14 @@ async def launch_game_from_registration(bot: Bot, room, chat_id: int, chat_title
         pass
 
     await start_phase_timer(room, bot)
-    try:
-        await push_phase_action_menus(bot, room)
-    except Exception:
-        pass
+    results = await asyncio.gather(
+        send_role_cards(),
+        push_phase_action_menus(bot, room),
+        return_exceptions=True,
+    )
+    for result in results:
+        if isinstance(result, Exception):
+            continue
 
 
 async def process_registration_timeout(bot: Bot, chat_id: int) -> None:
