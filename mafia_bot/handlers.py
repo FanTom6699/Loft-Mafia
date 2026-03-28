@@ -238,7 +238,16 @@ async def start_registration_timer(room, bot: Bot, seconds: int) -> None:
 async def launch_game_from_registration(bot: Bot, room, chat_id: int, chat_title: str | None) -> None:
     cancel_registration_timer(chat_id)
     room.close_registration()
-    room.assign_roles()
+    try:
+        room.assign_roles()
+    except Exception:
+        try:
+            await bot.send_message(chat_id, "Не удалось начать игру. Попробуй /close и создай лобби заново.")
+        except Exception:
+            pass
+        return
+
+    await clear_registration_post(bot, room)
     clear_action_menu_messages(chat_id)
     persist_room(room)
 
@@ -268,6 +277,11 @@ async def launch_game_from_registration(bot: Bot, room, chat_id: int, chat_title
                 pass
 
     try:
+        await bot.send_message(chat_id, "🌙 Наступает ночь.")
+    except Exception:
+        pass
+
+    try:
         await send_phase_media(bot, chat_id, room.night_intro_text(), NIGHT_IMAGE_PATH)
     except Exception:
         try:
@@ -295,6 +309,12 @@ async def launch_game_from_registration(bot: Bot, room, chat_id: int, chat_title
     except Exception:
         pass
 
+    try:
+        await bot.send_message(chat_id, room.alive_players_text())
+        await bot.send_message(chat_id, room.alive_role_counts_text())
+    except Exception:
+        pass
+
     await start_phase_timer(room, bot)
     try:
         await push_phase_action_menus(bot, room)
@@ -310,6 +330,7 @@ async def process_registration_timeout(bot: Bot, chat_id: int) -> None:
         return
 
     if len(room.players) < MIN_PLAYERS:
+        await clear_registration_post(bot, room)
         cancel_registration_timer(chat_id)
         clear_chat_penalties(chat_id)
         clear_action_menu_messages(chat_id)
@@ -524,6 +545,38 @@ async def refresh_registration_post(message: Message, room) -> None:
         )
     except Exception:
         return
+
+
+async def pin_registration_post(bot: Bot, room) -> None:
+    if room.registration_message_id is None:
+        return
+    try:
+        await bot.pin_chat_message(
+            chat_id=room.chat_id,
+            message_id=room.registration_message_id,
+            disable_notification=True,
+        )
+    except Exception:
+        return
+
+
+async def clear_registration_post(bot: Bot, room) -> None:
+    message_id = room.registration_message_id
+    if message_id is None:
+        return
+
+    room.registration_message_id = None
+    persist_room(room)
+
+    try:
+        await bot.unpin_chat_message(chat_id=room.chat_id, message_id=message_id)
+    except Exception:
+        pass
+
+    try:
+        await bot.delete_message(chat_id=room.chat_id, message_id=message_id)
+    except Exception:
+        pass
 
 
 def registration_lobby_keyboard(join_link: str) -> InlineKeyboardMarkup:
@@ -1322,18 +1375,19 @@ async def cmd_create(message: Message) -> None:
             )
             room.registration_message_id = sent.message_id
             persist_room(room)
+            await pin_registration_post(message.bot, room)
         else:
             await refresh_registration_post(message, room)
+            await pin_registration_post(message.bot, room)
         await message.answer(
             "Лобби уже создано. Используй существующее сообщение регистрации "
-            "или команду /join."
+            "и кнопку регистрации под ним."
         )
         return
 
     room.chat_title = message.chat.title or "Групповой чат"
     room.players.clear()
     room.open_registration()
-    room.add_player(message.from_user.id, user_nickname(message.from_user))
     persist_room(room)
     join_link = await registration_join_link(message, message.chat.id)
 
@@ -1343,9 +1397,10 @@ async def cmd_create(message: Message) -> None:
     )
     room.registration_message_id = sent.message_id
     persist_room(room)
+    await pin_registration_post(message.bot, room)
     await start_registration_timer(room, message.bot, REGISTRATION_SECONDS)
     await message.answer(
-        "Регистрация запущена через команду. Игроки входят через /join в группе.\n"
+        "Регистрация запущена через команду. Игроки входят через кнопку под закрепленным лобби.\n"
         f"Автостарт через {REGISTRATION_SECONDS} сек."
     )
 
@@ -1371,6 +1426,7 @@ async def cmd_leave(message: Message) -> None:
         await message.answer(room.lobby_text())
         await refresh_registration_post(message, room)
     else:
+        await clear_registration_post(message.bot, room)
         cancel_phase_timer(message.chat.id)
         cancel_registration_timer(message.chat.id)
         clear_chat_penalties(message.chat.id)
@@ -1455,7 +1511,6 @@ async def on_registration_action(callback: CallbackQuery) -> None:
 
         room.chat_title = callback.message.chat.title or "Групповой чат"
         room.open_registration()
-        room.add_player(callback.from_user.id, user_nickname(callback.from_user))
         persist_room(room)
         await start_registration_timer(room, callback.bot, REGISTRATION_SECONDS)
         join_link = await registration_join_link(callback.message, chat_id)
@@ -1465,7 +1520,8 @@ async def on_registration_action(callback: CallbackQuery) -> None:
         )
         room.registration_message_id = sent.message_id
         persist_room(room)
-        await callback.message.answer("Лобби создано. Игроки могут входить через /join или кнопку ниже")
+        await pin_registration_post(callback.bot, room)
+        await callback.message.answer("Лобби создано. Игроки могут входить через кнопку ниже")
         await callback.message.answer(f"Автостарт через {REGISTRATION_SECONDS} сек.")
         await callback.answer("Готово")
         return
@@ -1506,6 +1562,7 @@ async def on_registration_action(callback: CallbackQuery) -> None:
             await refresh_registration_post(callback.message, room)
             await callback.answer("Ты вышел из лобби")
         else:
+            await clear_registration_post(callback.bot, room)
             cancel_phase_timer(chat_id)
             cancel_registration_timer(chat_id)
             clear_chat_penalties(chat_id)
@@ -1539,6 +1596,7 @@ async def on_registration_action(callback: CallbackQuery) -> None:
         if not await is_group_admin(callback.bot, chat_id, callback.from_user.id):
             await callback.answer("Отменять игру может только админ группы.", show_alert=True)
             return
+        await clear_registration_post(callback.bot, room)
         cancel_phase_timer(chat_id)
         cancel_registration_timer(chat_id)
         clear_chat_penalties(chat_id)
@@ -1553,6 +1611,7 @@ async def on_registration_action(callback: CallbackQuery) -> None:
         if not await is_group_admin(callback.bot, chat_id, callback.from_user.id):
             await callback.answer("Отменять игру может только админ группы.", show_alert=True)
             return
+        await clear_registration_post(callback.bot, room)
         cancel_phase_timer(chat_id)
         cancel_registration_timer(chat_id)
         clear_chat_penalties(chat_id)
@@ -2048,6 +2107,7 @@ async def cmd_close(message: Message) -> None:
         await message.answer("Отменять игру может только админ группы.")
         return
 
+    await clear_registration_post(message.bot, room)
     cancel_phase_timer(message.chat.id)
     cancel_registration_timer(message.chat.id)
     clear_chat_penalties(message.chat.id)
