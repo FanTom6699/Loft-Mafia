@@ -512,6 +512,18 @@ def registration_text(room) -> str:
     return "\n".join(lines)
 
 
+def registration_post_text(room) -> str:
+    remaining = registration_remaining_seconds(room)
+    if remaining <= 0:
+        remaining = REGISTRATION_SECONDS
+    return (
+        registration_text(room)
+        + "\n\nНажми кнопку ниже, чтобы зарегистрироваться через ЛС."
+        + f"\n⏱ Автостарт через {remaining} сек."
+        + " Если нужно больше времени - продлите: /extend"
+    )
+
+
 async def private_bot_link(bot: Bot) -> str:
     me = await bot.get_me()
     return f"https://t.me/{me.username}"
@@ -543,7 +555,7 @@ async def refresh_registration_post(message: Message, room) -> None:
         await message.bot.edit_message_text(
             chat_id=room.chat_id,
             message_id=room.registration_message_id,
-            text=registration_text(room) + "\n\nНажми кнопку ниже, чтобы зарегистрироваться через ЛС.",
+            text=registration_post_text(room),
             reply_markup=registration_lobby_keyboard(join_link),
         )
     except Exception:
@@ -1376,7 +1388,7 @@ async def cmd_create(message: Message) -> None:
         join_link = await registration_join_link(message, message.chat.id)
         if room.registration_message_id is None:
             sent = await message.answer(
-                registration_text(room) + "\n\nНажми кнопку ниже, чтобы зарегистрироваться через ЛС.",
+                registration_post_text(room),
                 reply_markup=registration_lobby_keyboard(join_link),
             )
             room.registration_message_id = sent.message_id
@@ -1398,7 +1410,7 @@ async def cmd_create(message: Message) -> None:
     join_link = await registration_join_link(message, message.chat.id)
 
     sent = await message.answer(
-        registration_text(room) + "\n\nНажми кнопку ниже, чтобы зарегистрироваться через ЛС.",
+        registration_post_text(room),
         reply_markup=registration_lobby_keyboard(join_link),
     )
     room.registration_message_id = sent.message_id
@@ -1406,8 +1418,7 @@ async def cmd_create(message: Message) -> None:
     await pin_registration_post(message.bot, room)
     await start_registration_timer(room, message.bot, REGISTRATION_SECONDS)
     await message.answer(
-        "Регистрация запущена через команду. Игроки входят через кнопку под закрепленным лобби.\n"
-        f"Автостарт через {REGISTRATION_SECONDS} сек."
+        "Регистрация запущена через команду. Игроки входят через кнопку под закрепленным лобби."
     )
 
 
@@ -1521,14 +1532,13 @@ async def on_registration_action(callback: CallbackQuery) -> None:
         await start_registration_timer(room, callback.bot, REGISTRATION_SECONDS)
         join_link = await registration_join_link(callback.message, chat_id)
         sent = await callback.message.answer(
-            registration_text(room) + "\n\nНажми кнопку ниже, чтобы зарегистрироваться через ЛС.",
+            registration_post_text(room),
             reply_markup=registration_lobby_keyboard(join_link),
         )
         room.registration_message_id = sent.message_id
         persist_room(room)
         await pin_registration_post(callback.bot, room)
         await callback.message.answer("Лобби создано. Игроки могут входить через кнопку ниже")
-        await callback.message.answer(f"Автостарт через {REGISTRATION_SECONDS} сек.")
         await callback.answer("Готово")
         return
 
