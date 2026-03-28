@@ -266,16 +266,26 @@ async def launch_game_from_registration(bot: Bot, room, chat_id: int, chat_title
     room.close_registration()
     try:
         room.assign_roles()
-    except Exception:
+    except Exception as e:
         try:
-            await bot.send_message(chat_id, "Не удалось начать игру. Попробуй /close и создай лобби заново.")
-        except Exception:
-            pass
+            await bot.send_message(chat_id, f"Не удалось начать игру. Ошибка: {e!r}\nПопробуй /close и создай лобби заново.")
+        except Exception as e2:
+            print(f"[ERROR] Не удалось отправить сообщение об ошибке: {e2!r}")
+        print(f"[ERROR] assign_roles: {e!r}")
         return
 
-    await clear_registration_post(bot, room)
-    clear_action_menu_messages(chat_id)
-    persist_room(room)
+    try:
+        await clear_registration_post(bot, room)
+    except Exception as e:
+        print(f"[ERROR] clear_registration_post: {e!r}")
+    try:
+        clear_action_menu_messages(chat_id)
+    except Exception as e:
+        print(f"[ERROR] clear_action_menu_messages: {e!r}")
+    try:
+        persist_room(room)
+    except Exception as e:
+        print(f"[ERROR] persist_room: {e!r}")
 
     try:
         await bot.send_message(
@@ -283,8 +293,8 @@ async def launch_game_from_registration(bot: Bot, room, chat_id: int, chat_title
             "Игра начинается!\n\n"
             "В течение нескольких секунд бот пришлет вам в ЛС роль и меню действий.",
         )
-    except Exception:
-        pass
+    except Exception as e:
+        print(f"[ERROR] send_message(Игра начинается): {e!r}")
 
     async def send_role_cards() -> None:
         async def send_one_role_card(player) -> tuple[str, bool]:
@@ -295,13 +305,18 @@ async def launch_game_from_registration(bot: Bot, room, chat_id: int, chat_title
                     card_text += mafia_allies_text(room)
                 await asyncio.wait_for(bot.send_message(player.user_id, card_text), timeout=8)
                 return name, True
-            except Exception:
+            except Exception as e:
+                print(f"[ERROR] send_one_role_card({name}): {e!r}")
                 return name, False
 
-        results = await asyncio.gather(
-            *(send_one_role_card(player) for player in room.players.values()),
-            return_exceptions=False,
-        )
+        try:
+            results = await asyncio.gather(
+                *(send_one_role_card(player) for player in room.players.values()),
+                return_exceptions=False,
+            )
+        except Exception as e:
+            print(f"[ERROR] send_role_cards gather: {e!r}")
+            results = []
         failed_names = [name for name, ok in results if not ok]
 
         if failed_names:
@@ -312,21 +327,23 @@ async def launch_game_from_registration(bot: Bot, room, chat_id: int, chat_title
                     + ", ".join(failed_names)
                     + ". Пусть напишут боту /start в личке.",
                 )
-            except Exception:
-                pass
+            except Exception as e:
+                print(f"[ERROR] send_message(Не смог отправить роли): {e!r}")
 
     try:
         await send_phase_media(bot, chat_id, room.night_media_caption(), NIGHT_IMAGE_PATH)
-    except Exception:
+    except Exception as e:
+        print(f"[ERROR] send_phase_media: {e!r}")
         try:
             await bot.send_message(chat_id, room.night_media_caption())
-        except Exception:
-            pass
+        except Exception as e2:
+            print(f"[ERROR] send_message(night_media_caption): {e2!r}")
 
     keyboard: InlineKeyboardMarkup | None = None
     try:
         keyboard = await night_action_keyboard(bot)
-    except Exception:
+    except Exception as e:
+        print(f"[ERROR] night_action_keyboard: {e!r}")
         keyboard = None
 
     try:
@@ -335,53 +352,92 @@ async def launch_game_from_registration(bot: Bot, room, chat_id: int, chat_title
             f"Живых игроков: {len(room.alive_players())}. До рассвета {NIGHT_PHASE_SECONDS} сек.",
             reply_markup=keyboard,
         )
-    except Exception:
-        pass
+    except Exception as e:
+        print(f"[ERROR] send_message(Живых игроков): {e!r}")
 
     try:
         await bot.send_message(chat_id, "Роли делают свой выбор в личке бота. Меню разослано автоматически.")
-    except Exception:
-        pass
+    except Exception as e:
+        print(f"[ERROR] send_message(Роли делают свой выбор): {e!r}")
 
     try:
         await bot.send_message(chat_id, room.alive_players_text())
         await bot.send_message(chat_id, room.alive_role_counts_text())
-    except Exception:
-        pass
+    except Exception as e:
+        print(f"[ERROR] send_message(alive_players/role_counts): {e!r}")
 
-    await start_phase_timer(room, bot)
-    results = await asyncio.gather(
-        send_role_cards(),
-        push_phase_action_menus(bot, room),
-        return_exceptions=True,
-    )
-    for result in results:
-        if isinstance(result, Exception):
-            continue
+    try:
+        await start_phase_timer(room, bot)
+    except Exception as e:
+        print(f"[ERROR] start_phase_timer: {e!r}")
+    try:
+        results = await asyncio.gather(
+            send_role_cards(),
+            push_phase_action_menus(bot, room),
+            return_exceptions=True,
+        )
+        for result in results:
+            if isinstance(result, Exception):
+                print(f"[ERROR] gather result: {result!r}")
+    except Exception as e:
+        print(f"[ERROR] gather(send_role_cards, push_phase_action_menus): {e!r}")
 
 
 async def process_registration_timeout(bot: Bot, chat_id: int) -> None:
-    room = storage.get_room(chat_id)
+    try:
+        room = storage.get_room(chat_id)
+    except Exception as e:
+        print(f"[ERROR] storage.get_room: {e!r}")
+        return
     if room is None:
+        print(f"[ERROR] process_registration_timeout: room is None for chat_id={chat_id}")
         return
     if room.started or not room.registration_open:
+        print(f"[ERROR] process_registration_timeout: already started or registration closed for chat_id={chat_id}")
         return
 
     if len(room.players) < MIN_PLAYERS:
-        await clear_registration_post(bot, room)
-        cancel_registration_timer(chat_id)
-        clear_chat_penalties(chat_id)
-        clear_action_menu_messages(chat_id)
-        remove_room_state(chat_id)
-        storage.close_room(chat_id)
-        await bot.send_message(
-            chat_id,
-            f"Регистрация отменена: недостаточно игроков. Нужно минимум {MIN_PLAYERS}.",
-        )
+        try:
+            await clear_registration_post(bot, room)
+        except Exception as e:
+            print(f"[ERROR] clear_registration_post (min players): {e!r}")
+        try:
+            cancel_registration_timer(chat_id)
+        except Exception as e:
+            print(f"[ERROR] cancel_registration_timer (min players): {e!r}")
+        try:
+            clear_chat_penalties(chat_id)
+        except Exception as e:
+            print(f"[ERROR] clear_chat_penalties (min players): {e!r}")
+        try:
+            clear_action_menu_messages(chat_id)
+        except Exception as e:
+            print(f"[ERROR] clear_action_menu_messages (min players): {e!r}")
+        try:
+            remove_room_state(chat_id)
+        except Exception as e:
+            print(f"[ERROR] remove_room_state (min players): {e!r}")
+        try:
+            storage.close_room(chat_id)
+        except Exception as e:
+            print(f"[ERROR] storage.close_room (min players): {e!r}")
+        try:
+            await bot.send_message(
+                chat_id,
+                f"Регистрация отменена: недостаточно игроков. Нужно минимум {MIN_PLAYERS}.",
+            )
+        except Exception as e:
+            print(f"[ERROR] send_message(Регистрация отменена): {e!r}")
         return
 
-    await bot.send_message(chat_id, "⏱ Время регистрации вышло. Запускаю игру автоматически.")
-    await launch_game_from_registration(bot, room, chat_id, room.chat_title)
+    try:
+        await bot.send_message(chat_id, "⏱ Время регистрации вышло. Запускаю игру автоматически.")
+    except Exception as e:
+        print(f"[ERROR] send_message(Время регистрации вышло): {e!r}")
+    try:
+        await launch_game_from_registration(bot, room, chat_id, room.chat_title)
+    except Exception as e:
+        print(f"[ERROR] launch_game_from_registration: {e!r}")
 
 
 def ensure_stats_recorded(room) -> None:
