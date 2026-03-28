@@ -46,6 +46,7 @@ DAY_NOMINATION_SECONDS = read_phase_seconds("DAY_NOMINATION_SECONDS", 60)
 DAY_TRIAL_SECONDS = read_phase_seconds("DAY_TRIAL_SECONDS", 30)
 REGISTRATION_SECONDS = read_phase_seconds("REGISTRATION_SECONDS", 60)
 REGISTRATION_EXTENSION_SECONDS = read_phase_seconds("REGISTRATION_EXTENSION_SECONDS", 30)
+RESTART_EXPIRED_PHASE_POLICY = os.getenv("RESTART_EXPIRED_PHASE_POLICY", "catch_up").strip().lower()
 DAY_IMAGE_PATH = os.getenv("DAY_IMAGE_PATH", os.path.join("assets", "day.jpg"))
 NIGHT_IMAGE_PATH = os.getenv("NIGHT_IMAGE_PATH", os.path.join("assets", "night.jpg"))
 
@@ -1026,7 +1027,10 @@ async def process_night_end(bot: Bot, chat_id: int, timer_reason: str | None = N
             return
 
         if timer_reason:
-            await bot.send_message(chat_id, timer_reason)
+            try:
+                await bot.send_message(chat_id, timer_reason)
+            except Exception as e:
+                print(f"[ERROR] process_night_end: failed to send timer_reason for chat_id={chat_id}, error={e!r}")
 
         reports = room.pop_night_reports()
         kill_sources = room.pop_night_kill_sources()
@@ -1096,7 +1100,10 @@ async def process_day_end(bot: Bot, chat_id: int, timer_reason: str | None = Non
 
         if timer_reason:
             print(f"[PHASE] process_day_end: timer_reason={timer_reason}")
-            await bot.send_message(chat_id, timer_reason)
+            try:
+                await bot.send_message(chat_id, timer_reason)
+            except Exception as e:
+                print(f"[ERROR] process_day_end: failed to send timer_reason for chat_id={chat_id}, error={e!r}")
 
         if room.day_stage == DAY_STAGE_DISCUSSION:
             print(f"[PHASE] process_day_end: switching to nomination stage for chat_id={chat_id}")
@@ -1234,6 +1241,7 @@ async def process_day_end(bot: Bot, chat_id: int, timer_reason: str | None = Non
             persist_room(room)
             return
 
+        print(f"[ERROR] process_day_end: unknown day_stage for chat_id={chat_id}, day_stage={room.day_stage}, phase={room.phase}")
         await bot.send_message(chat_id, "Не удалось определить текущий этап дня.")
 
 
@@ -1250,6 +1258,8 @@ async def phase_timer_worker(bot: Bot, chat_id: int, phase: str, duration_sec: i
             await process_day_end(bot, chat_id, timer_reason="⏱ Время дня вышло. Фаза закрыта автоматически.")
     except asyncio.CancelledError:
         return
+    except Exception as e:
+        print(f"[ERROR] phase_timer_worker: chat_id={chat_id}, phase={phase}, error={e!r}")
 
 
 async def start_phase_timer(
@@ -1309,19 +1319,30 @@ async def restore_runtime_state(bot: Bot) -> None:
             remaining_sec = base_duration - elapsed
 
         if remaining_sec is not None and remaining_sec <= 0:
-            if room.phase == PHASE_NIGHT:
-                await process_night_end(
-                    bot,
-                    room.chat_id,
-                    timer_reason="⏱ Время ночи истекло во время перезапуска. Фаза закрыта автоматически."
+            if RESTART_EXPIRED_PHASE_POLICY == "restart":
+                # Restart the current phase from a full timer after reboot instead of auto-closing it.
+                remaining_sec = base_duration
+                room.phase_started_at = datetime.now()
+                room.phase_duration_seconds = base_duration
+                persist_room(room)
+                print(
+                    f"[PHASE] restore_runtime_state: expired phase restarted for chat_id={room.chat_id}, "
+                    f"phase={room.phase}, duration={remaining_sec}s"
                 )
-            elif room.phase == PHASE_DAY:
-                await process_day_end(
-                    bot,
-                    room.chat_id,
-                    timer_reason="⏱ Время дня истекло во время перезапуска. Фаза закрыта автоматически."
-                )
-            continue
+            else:
+                if room.phase == PHASE_NIGHT:
+                    await process_night_end(
+                        bot,
+                        room.chat_id,
+                        timer_reason="⏱ Время ночи истекло во время перезапуска. Фаза закрыта автоматически."
+                    )
+                elif room.phase == PHASE_DAY:
+                    await process_day_end(
+                        bot,
+                        room.chat_id,
+                        timer_reason="⏱ Время дня истекло во время перезапуска. Фаза закрыта автоматически."
+                    )
+                continue
 
         await start_phase_timer(room, bot, remaining_sec=remaining_sec, reset_deadline=False)
         await push_phase_action_menus(bot, room)
