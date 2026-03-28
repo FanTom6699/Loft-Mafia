@@ -1266,8 +1266,13 @@ async def cmd_start(message: Message, command: CommandObject) -> None:
     if message.chat.type == "private" and command.args and command.args.startswith("join_"):
         if is_private_first_visit:
             await message.answer(
-                f"Привет, {nickname}! Добро пожаловать в Мафию. "
-                "Сейчас зарегистрирую тебя в лобби и дальше буду присылать ходы автоматически."
+                (
+                    "<b>Добро пожаловать в Мафию</b>\n\n"
+                    f"👋 Привет, {nickname}!\n"
+                    "Сейчас зарегистрирую тебя в лобби.\n\n"
+                    "<b>Дальше:</b>\n"
+                    "• Роль и меню ходов будут приходить автоматически в этот чат."
+                )
             )
         try:
             chat_id = int(command.args.split("_", maxsplit=1)[1])
@@ -1298,8 +1303,11 @@ async def cmd_start(message: Message, command: CommandObject) -> None:
         persist_room(room)
 
         await message.answer(
-            f"Ты зарегистрирован в чате: {room.chat_title or room.chat_id}.\n"
-            f"Твой ник в лобби: {nickname}."
+            (
+                "<b>Регистрация завершена</b>\n\n"
+                f"Чат: <b>{room.chat_title or room.chat_id}</b>\n"
+                f"Ник в лобби: <b>{nickname}</b>"
+            )
         )
         await refresh_registration_post(message, room)
         return
@@ -1314,14 +1322,18 @@ async def cmd_start(message: Message, command: CommandObject) -> None:
         )
         if is_private_first_visit:
             text = (
-                f"Привет, {nickname}! Добро пожаловать в бота Мафии.\n\n"
-                "Здесь ты получаешь роль, делаешь ходы и смотришь статистику.\n"
-                "Создай или найди лобби в группе, а дальше бот сам подскажет что делать."
+                "<b>Добро пожаловать в бота Мафии</b>\n\n"
+                f"👋 Привет, {nickname}!\n\n"
+                "<b>В этом чате ты можешь:</b>\n"
+                "• Получать роль и задания по фазам\n"
+                "• Делать ходы кнопками\n"
+                "• Смотреть профиль, роли и статистику\n\n"
+                "Найди лобби в группе и присоединяйся."
             )
         else:
             text = (
-                f"С возвращением, {nickname}.\n"
-                "Открывай нужный раздел кнопками ниже."
+                f"<b>С возвращением, {nickname}!</b>\n\n"
+                "Выбери нужный раздел кнопками ниже."
             )
         await message.answer(
             text,
