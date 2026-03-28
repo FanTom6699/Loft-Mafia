@@ -45,6 +45,16 @@ class GameStateRepository:
                 )
                 """
             )
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS private_users (
+                    user_id INTEGER PRIMARY KEY,
+                    display_name TEXT NOT NULL,
+                    first_seen_at TEXT NOT NULL,
+                    last_seen_at TEXT NOT NULL
+                )
+                """
+            )
             conn.commit()
 
     @staticmethod
@@ -275,6 +285,41 @@ class GameStateRepository:
         if row is None:
             return None
         return dict(row)
+
+    def touch_private_user(self, user_id: int, display_name: str) -> bool:
+        now = datetime.now().isoformat()
+        with sqlite3.connect(self.db_path) as conn:
+            row = conn.execute(
+                "SELECT user_id FROM private_users WHERE user_id = ?",
+                (user_id,),
+            ).fetchone()
+
+            if row is None:
+                conn.execute(
+                    """
+                    INSERT INTO private_users(
+                        user_id,
+                        display_name,
+                        first_seen_at,
+                        last_seen_at
+                    )
+                    VALUES(?, ?, ?, ?)
+                    """,
+                    (user_id, display_name, now, now),
+                )
+                conn.commit()
+                return True
+
+            conn.execute(
+                """
+                UPDATE private_users
+                SET display_name = ?, last_seen_at = ?
+                WHERE user_id = ?
+                """,
+                (display_name, now, user_id),
+            )
+            conn.commit()
+        return False
 
     def save_room(self, room: GameRoom) -> None:
         payload = self._serialize_room(room)

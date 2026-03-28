@@ -1257,7 +1257,18 @@ def mafia_allies_text(room) -> str:
 
 @router.message(CommandStart())
 async def cmd_start(message: Message, command: CommandObject) -> None:
+    is_private_first_visit = False
+    nickname = ""
+    if message.chat.type == "private":
+        nickname = user_nickname(message.from_user)
+        is_private_first_visit = repo.touch_private_user(message.from_user.id, nickname)
+
     if message.chat.type == "private" and command.args and command.args.startswith("join_"):
+        if is_private_first_visit:
+            await message.answer(
+                f"Привет, {nickname}! Добро пожаловать в Мафию. "
+                "Сейчас зарегистрирую тебя в лобби и дальше буду присылать ходы автоматически."
+            )
         try:
             chat_id = int(command.args.split("_", maxsplit=1)[1])
         except ValueError:
@@ -1277,7 +1288,6 @@ async def cmd_start(message: Message, command: CommandObject) -> None:
             await message.answer("Регистрация уже закрыта.")
             return
 
-        nickname = user_nickname(message.from_user)
         ok, info = room.add_player(message.from_user.id, nickname)
         if not ok:
             if info == "Ты уже в лобби.":
@@ -1302,9 +1312,19 @@ async def cmd_start(message: Message, command: CommandObject) -> None:
                 [InlineKeyboardButton(text="Статистика", callback_data="pmenu:stats")],
             ]
         )
+        if is_private_first_visit:
+            text = (
+                f"Привет, {nickname}! Добро пожаловать в бота Мафии.\n\n"
+                "Здесь ты получаешь роль, делаешь ходы и смотришь статистику.\n"
+                "Создай или найди лобби в группе, а дальше бот сам подскажет что делать."
+            )
+        else:
+            text = (
+                f"С возвращением, {nickname}.\n"
+                "Открывай нужный раздел кнопками ниже."
+            )
         await message.answer(
-            "Привет. Все в ЛС можно открыть кнопками ниже, без команд."
-            " Игровые ходы бот присылает автоматически по фазам.",
+            text,
             reply_markup=keyboard,
         )
         return
@@ -2085,6 +2105,10 @@ async def enforce_group_game_rules(message: Message) -> None:
 
     if message.from_user is None or message.from_user.is_bot:
         return
+
+    if message.text and message.text.startswith("!"):
+        if await is_group_admin(message.bot, message.chat.id, message.from_user.id):
+            return
 
     if is_user_blocked(message.chat.id, message.from_user.id):
         await safe_delete_message(message)
