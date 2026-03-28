@@ -481,9 +481,12 @@ async def process_rule_violation(message: Message) -> None:
 
 
 def user_nickname(user: User) -> str:
+    nickname = (user.full_name or "").strip()
+    if nickname:
+        return nickname
     if user.username:
         return f"@{user.username}"
-    return user.full_name
+    return f"Игрок {user.id}"
 
 
 def player_display_name(player) -> str:
@@ -680,7 +683,7 @@ def build_action_keyboard(room, actor_user_id: int) -> InlineKeyboardMarkup | No
                 rows.append(
                     [
                         InlineKeyboardButton(
-                            text=f"Устранить: {mark(player_display_name(target), target.user_id)}",
+                            text=mark(player_display_name(target), target.user_id),
                             callback_data=f"act:kill:{room.chat_id}:{target.user_id}",
                         )
                     ]
@@ -690,7 +693,7 @@ def build_action_keyboard(room, actor_user_id: int) -> InlineKeyboardMarkup | No
                 rows.append(
                     [
                         InlineKeyboardButton(
-                            text=f"Лечить: {mark(player_display_name(target), target.user_id)}",
+                            text=mark(player_display_name(target), target.user_id),
                             callback_data=f"act:heal:{room.chat_id}:{target.user_id}",
                         )
                     ]
@@ -700,7 +703,7 @@ def build_action_keyboard(room, actor_user_id: int) -> InlineKeyboardMarkup | No
                 rows.append(
                     [
                         InlineKeyboardButton(
-                            text=f"Проверить: {mark(player_display_name(target), target.user_id)}",
+                            text=mark(player_display_name(target), target.user_id),
                             callback_data=f"act:check:{room.chat_id}:{target.user_id}",
                         )
                     ]
@@ -710,7 +713,7 @@ def build_action_keyboard(room, actor_user_id: int) -> InlineKeyboardMarkup | No
                 rows.append(
                     [
                         InlineKeyboardButton(
-                            text=f"Маньяк: {mark(player_display_name(target), target.user_id)}",
+                            text=mark(player_display_name(target), target.user_id),
                             callback_data=f"act:maniac:{room.chat_id}:{target.user_id}",
                         )
                     ]
@@ -720,7 +723,7 @@ def build_action_keyboard(room, actor_user_id: int) -> InlineKeyboardMarkup | No
                 rows.append(
                     [
                         InlineKeyboardButton(
-                            text=f"Отвлечь: {mark(player_display_name(target), target.user_id)}",
+                            text=mark(player_display_name(target), target.user_id),
                             callback_data=f"act:mistress:{room.chat_id}:{target.user_id}",
                         )
                     ]
@@ -730,7 +733,7 @@ def build_action_keyboard(room, actor_user_id: int) -> InlineKeyboardMarkup | No
                 rows.append(
                     [
                         InlineKeyboardButton(
-                            text=f"Наблюдать: {mark(player_display_name(target), target.user_id)}",
+                            text=mark(player_display_name(target), target.user_id),
                             callback_data=f"act:bum:{room.chat_id}:{target.user_id}",
                         )
                     ]
@@ -741,7 +744,7 @@ def build_action_keyboard(room, actor_user_id: int) -> InlineKeyboardMarkup | No
             rows.append(
                 [
                     InlineKeyboardButton(
-                        text=f"Кандидат: {mark(player_display_name(target), target.user_id)}",
+                        text=mark(player_display_name(target), target.user_id),
                         callback_data=f"act:vote:{room.chat_id}:{target.user_id}",
                     )
                 ]
@@ -1252,6 +1255,9 @@ async def cmd_start(message: Message, command: CommandObject) -> None:
         nickname = user_nickname(message.from_user)
         ok, info = room.add_player(message.from_user.id, nickname)
         if not ok:
+            if info == "Ты уже в лобби.":
+                persist_room(room)
+                await refresh_registration_post(message, room)
             await message.answer(info)
             return
         persist_room(room)
@@ -1540,6 +1546,9 @@ async def on_registration_action(callback: CallbackQuery) -> None:
 
         ok, info = room.add_player(callback.from_user.id, user_nickname(callback.from_user))
         if not ok:
+            if info == "Ты уже в лобби.":
+                persist_room(room)
+                await refresh_registration_post(callback.message, room)
             await callback.answer(info, show_alert=True)
             return
         persist_room(room)

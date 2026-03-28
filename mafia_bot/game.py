@@ -220,6 +220,7 @@ class GameRoom:
         if not self.registration_open:
             return False, "Регистрация закрыта."
         if user_id in self.players:
+            self.players[user_id].full_name = full_name
             return False, "Ты уже в лобби."
         self.players[user_id] = Player(user_id=user_id, full_name=full_name)
         return True, "Игрок добавлен."
