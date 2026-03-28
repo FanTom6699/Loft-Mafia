@@ -1079,18 +1079,27 @@ async def process_night_end(bot: Bot, chat_id: int, timer_reason: str | None = N
 
 
 async def process_day_end(bot: Bot, chat_id: int, timer_reason: str | None = None) -> None:
+
     lock = get_phase_lock(chat_id)
     async with lock:
+        print(f"[PHASE] process_day_end called for chat_id={chat_id}")
         room = storage.get_room(chat_id)
-        if room is None or room.phase != "day":
+        if room is None:
+            print(f"[PHASE] process_day_end: room is None for chat_id={chat_id}")
+            return
+        if room.phase != "day":
+            print(f"[PHASE] process_day_end: phase is not 'day' (actual: {room.phase}) for chat_id={chat_id}")
             return
 
+        print(f"[PHASE] process_day_end: current day_stage={room.day_stage}")
         cancel_phase_timer(chat_id)
 
         if timer_reason:
+            print(f"[PHASE] process_day_end: timer_reason={timer_reason}")
             await bot.send_message(chat_id, timer_reason)
 
         if room.day_stage == DAY_STAGE_DISCUSSION:
+            print(f"[PHASE] process_day_end: switching to nomination stage for chat_id={chat_id}")
             room.start_day_nomination()
             persist_room(room)
             await bot.send_message(
@@ -1103,6 +1112,7 @@ async def process_day_end(bot: Bot, chat_id: int, timer_reason: str | None = Non
             )
             await push_phase_action_menus(bot, room)
             await start_phase_timer(room, bot)
+            print(f"[PHASE] process_day_end: nomination stage started, timer set for chat_id={chat_id}")
             return
 
         if room.day_stage == DAY_STAGE_NOMINATION:
@@ -1293,7 +1303,14 @@ async def restore_runtime_state(bot: Bot) -> None:
                     bot,
                     room.chat_id,
                     timer_reason="⏱ Время ночи истекло во время перезапуска. Фаза закрыта автоматически.",
-                )
+                            room = storage.get_room(chat_id)
+                            if room is None:
+                                print(f"[PHASE] process_night_end: room is None for chat_id={chat_id}")
+                                return
+                            if room.phase != "night":
+                                print(f"[PHASE] process_night_end: phase is not 'night' (actual: {room.phase}) for chat_id={chat_id}")
+                                return
+                            print(f"[PHASE] process_night_end: current phase={room.phase}")
             elif room.phase == PHASE_DAY:
                 await process_day_end(
                     bot,

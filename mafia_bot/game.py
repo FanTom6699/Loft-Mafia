@@ -46,14 +46,6 @@ ROLE_DESCRIPTION = {
         "Ты руководишь мафиозной стороной. "
         "Ночью вместе с мафией выбираешь цель и ведешь команду к победе."
     ),
-    ROLE_MAFIA: (
-        "Ты в мафиозной команде. "
-        "Твоя задача - ночью помогать устранять соперников и дожать город днем."
-    ),
-    ROLE_MANIAC: (
-        "Ты играешь сам за себя. "
-        "Выживи до конца и доведи партию до хаоса, где останешься только ты."
-    ),
     ROLE_COMMISSAR: (
         "Ты главный сыщик города. "
         "Ночью проверяешь игроков и ищешь тех, кто связан с мафией."
@@ -178,6 +170,12 @@ class Player:
 class GameRoom:
     chat_id: int
     host_id: int
+
+    def commissar_check_result_text(self, checked_player) -> str:
+        # Возвращает явный текст роли для проверки комиссаром
+        role = checked_player.role
+        emoji = ROLE_EMOJI.get(role, "")
+        return f"{checked_player.full_name}: {emoji} {role}"
     chat_title: str = ""
     players: dict[int, Player] = field(default_factory=dict)
     started: bool = False
@@ -797,16 +795,11 @@ class GameRoom:
                 checked = self.get_player(self.commissar_target_id)
                 if checked is not None and checked.alive:
                     self.add_night_report_line(checked.user_id, "🕵️ Ночью тебя проверял Комиссар.")
-                    if checked.role in MAFIA_ROLES:
-                        self.add_night_report_line(
-                            commissar.user_id,
-                            f"Проверка: {checked.full_name} выглядит подозрительно.",
-                        )
-                    else:
-                        self.add_night_report_line(
-                            commissar.user_id,
-                            f"Проверка: {checked.full_name} не замечен в связях с мафией.",
-                        )
+                    # Явный вывод роли для комиссара
+                    self.add_night_report_line(
+                        commissar.user_id,
+                        f"Результат проверки: {self.commissar_check_result_text(checked)}",
+                    )
 
         attacks: dict[int, list[str]] = {}
         if mafia_target_id is not None:
