@@ -441,12 +441,14 @@ async def registration_join_link(message: Message, chat_id: int) -> str:
 
 
 def registration_text(room) -> str:
-    title = room.chat_title or "Этот чат"
-    return (
-        f"<b>Регистрация в игру Мафия</b>\n"
-        f"Чат: {title}\n\n"
-        f"{room.lobby_text()}"
-    )
+    lines = ["<b>Регистрация в игру Мафия</b>"]
+    if not room.players:
+        lines.append("Пока никого нет.")
+        return "\n".join(lines)
+
+    for i, player in enumerate(room.players.values(), start=1):
+        lines.append(f"{i}. {player_display_name(player)}")
+    return "\n".join(lines)
 
 
 async def private_bot_link(bot: Bot) -> str:
@@ -475,22 +477,23 @@ def trial_vote_keyboard(chat_id: int, yes_count: int, no_count: int) -> InlineKe
 async def refresh_registration_post(message: Message, room) -> None:
     if room.registration_message_id is None:
         return
+    join_link = await registration_join_link(message, room.chat_id)
     try:
         await message.bot.edit_message_text(
             chat_id=room.chat_id,
             message_id=room.registration_message_id,
-            text=registration_text(room) + "\n\nВход в лобби: /join в этом чате.",
-            reply_markup=registration_lobby_keyboard(),
+            text=registration_text(room) + "\n\nНажми кнопку ниже, чтобы зарегистрироваться через ЛС.",
+            reply_markup=registration_lobby_keyboard(join_link),
         )
     except Exception:
         return
 
 
-def registration_lobby_keyboard() -> InlineKeyboardMarkup:
+def registration_lobby_keyboard(join_link: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [
-                InlineKeyboardButton(text="Зарегистрироваться", callback_data="reg:join"),
+                InlineKeyboardButton(text="Зарегистрироваться", url=join_link),
             ],
         ]
     )
@@ -1137,7 +1140,41 @@ def mafia_allies_text(room) -> str:
 @router.message(CommandStart())
 async def cmd_start(message: Message, command: CommandObject) -> None:
     if message.chat.type == "private" and command.args and command.args.startswith("join_"):
-        await message.answer("Вход в игру через deep-link отключен. Присоединяйся в группе командой /join.")
+        try:
+            chat_id = int(command.args.split("_", maxsplit=1)[1])
+        except ValueError:
+            await message.answer("Некорректная ссылка приглашения.")
+            return
+
+        room = storage.get_room(chat_id)
+        if room is None:
+            await message.answer("Регистрация не найдена или уже завершена.")
+            return
+
+        if is_user_blocked(chat_id, message.from_user.id):
+            await notify_registration_blocked(message.bot, chat_id, message.from_user.id)
+            return
+
+        if not room.registration_open or room.started:
+            await message.answer("Регистрация уже закрыта.")
+            return
+
+        nickname = user_nickname(message.from_user)
+        ok, info = room.add_player(message.from_user.id, nickname)
+        if not ok:
+            await message.answer(info)
+            return
+        persist_room(room)
+
+        await message.answer(
+            f"Ты зарегистрирован в чате: {room.chat_title or room.chat_id}.\n"
+            f"Твой ник в лобби: {nickname}."
+        )
+        await message.bot.send_message(
+            room.chat_id,
+            f"{nickname} зарегистрировался в лобби.",
+        )
+        await refresh_registration_post(message, room)
         return
 
     if message.chat.type == "private":
@@ -1250,16 +1287,34 @@ async def cmd_create(message: Message) -> None:
     elif room.started:
         await message.answer("Игра уже идет. Заверши текущую игру перед новой регистрацией.")
         return
+    else:
+        room.chat_title = message.chat.title or "Групповой чат"
+        join_link = await registration_join_link(message, message.chat.id)
+        if room.registration_message_id is None:
+            sent = await message.answer(
+                registration_text(room) + "\n\nНажми кнопку ниже, чтобы зарегистрироваться через ЛС.",
+                reply_markup=registration_lobby_keyboard(join_link),
+            )
+            room.registration_message_id = sent.message_id
+            persist_room(room)
+        else:
+            await refresh_registration_post(message, room)
+        await message.answer(
+            "Лобби уже создано. Используй существующее сообщение регистрации "
+            "или команду /join."
+        )
+        return
 
     room.chat_title = message.chat.title or "Групповой чат"
     room.players.clear()
     room.open_registration()
     room.add_player(message.from_user.id, user_nickname(message.from_user))
     persist_room(room)
+    join_link = await registration_join_link(message, message.chat.id)
 
     sent = await message.answer(
-        registration_text(room) + "\n\nВход в лобби: /join в этом чате.",
-        reply_markup=registration_lobby_keyboard(),
+        registration_text(room) + "\n\nНажми кнопку ниже, чтобы зарегистрироваться через ЛС.",
+        reply_markup=registration_lobby_keyboard(join_link),
     )
     room.registration_message_id = sent.message_id
     persist_room(room)
@@ -1400,9 +1455,10 @@ async def on_registration_action(callback: CallbackQuery) -> None:
         room.add_player(callback.from_user.id, user_nickname(callback.from_user))
         persist_room(room)
         await start_registration_timer(room, callback.bot, REGISTRATION_SECONDS)
+        join_link = await registration_join_link(callback.message, chat_id)
         sent = await callback.message.answer(
-            registration_text(room) + "\n\nВход в лобби: /join в этом чате.",
-            reply_markup=registration_lobby_keyboard(),
+            registration_text(room) + "\n\nНажми кнопку ниже, чтобы зарегистрироваться через ЛС.",
+            reply_markup=registration_lobby_keyboard(join_link),
         )
         room.registration_message_id = sent.message_id
         persist_room(room)
