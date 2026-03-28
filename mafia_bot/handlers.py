@@ -1302,20 +1302,13 @@ async def restore_runtime_state(bot: Bot) -> None:
                 await process_night_end(
                     bot,
                     room.chat_id,
-                    timer_reason="⏱ Время ночи истекло во время перезапуска. Фаза закрыта автоматически.",
-                            room = storage.get_room(chat_id)
-                            if room is None:
-                                print(f"[PHASE] process_night_end: room is None for chat_id={chat_id}")
-                                return
-                            if room.phase != "night":
-                                print(f"[PHASE] process_night_end: phase is not 'night' (actual: {room.phase}) for chat_id={chat_id}")
-                                return
-                            print(f"[PHASE] process_night_end: current phase={room.phase}")
+                    timer_reason="⏱ Время ночи истекло во время перезапуска. Фаза закрыта автоматически."
+                )
             elif room.phase == PHASE_DAY:
                 await process_day_end(
                     bot,
                     room.chat_id,
-                    timer_reason="⏱ Время дня истекло во время перезапуска. Фаза закрыта автоматически.",
+                    timer_reason="⏱ Время дня истекло во время перезапуска. Фаза закрыта автоматически."
                 )
             continue
 
