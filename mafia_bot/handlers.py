@@ -66,9 +66,18 @@ def get_phase_lock(chat_id: int) -> asyncio.Lock:
 
 
 def cancel_phase_timer(chat_id: int) -> None:
-    timer = phase_timers.pop(chat_id, None)
-    if timer is not None:
-        timer.cancel()
+    timer = phase_timers.get(chat_id)
+    if timer is None:
+        return
+
+    current = asyncio.current_task()
+    if timer is current:
+        # The timer callback reached phase end itself; avoid self-cancel that aborts transition.
+        phase_timers.pop(chat_id, None)
+        return
+
+    phase_timers.pop(chat_id, None)
+    timer.cancel()
 
 
 def cancel_registration_timer(chat_id: int) -> None:
