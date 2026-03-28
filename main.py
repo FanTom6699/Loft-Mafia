@@ -6,7 +6,7 @@ from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 
 from mafia_bot.config import get_settings
-from mafia_bot.handlers import router
+from mafia_bot.handlers import restore_runtime_state, router
 
 
 async def main() -> None:
@@ -22,6 +22,8 @@ async def main() -> None:
     )
     dp = Dispatcher()
     dp.include_router(router)
+
+    await restore_runtime_state(bot)
 
     await dp.start_polling(bot)
 

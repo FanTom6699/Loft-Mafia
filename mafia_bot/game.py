@@ -28,17 +28,17 @@ ROLE_CITIZEN = "Мирный житель"
 MAFIA_ROLES = {ROLE_DON, ROLE_MAFIA}
 
 ROLE_EMOJI = {
-    ROLE_DON: "🤵🏻",
-    ROLE_MAFIA: "🤵🏼",
+    ROLE_DON: "👑",
+    ROLE_MAFIA: "🕶️",
     ROLE_MANIAC: "🔪",
     ROLE_COMMISSAR: "🕵️",
-    ROLE_DOCTOR: "👨🏼‍⚕️",
-    ROLE_MISTRESS: "💃",
+    ROLE_DOCTOR: "💉",
+    ROLE_MISTRESS: "💄",
     ROLE_BUM: "🧥",
-    ROLE_SUICIDE: "💣",
-    ROLE_LUCKY: "🤞",
+    ROLE_SUICIDE: "☠️",
+    ROLE_LUCKY: "🍀",
     ROLE_KAMIKAZE: "🧨",
-    ROLE_CITIZEN: "👨🏼",
+    ROLE_CITIZEN: "🕊️",
 }
 
 ROLE_DESCRIPTION = {
@@ -203,6 +203,12 @@ class GameRoom:
     mistress_target_id: int | None = None
     bum_target_id: int | None = None
     night_reports: dict[int, list[str]] = field(default_factory=dict)
+    pending_last_words: set[int] = field(default_factory=set)
+    used_last_words: set[int] = field(default_factory=set)
+    last_words_log: dict[int, str] = field(default_factory=dict)
+    phase_started_at: datetime | None = None
+    phase_duration_seconds: int | None = None
+    stats_recorded: bool = False
     suicide_winners: set[int] = field(default_factory=set)
     winner_team: str | None = None
     started_at: datetime | None = None
@@ -227,6 +233,12 @@ class GameRoom:
         self.finished_at = None
         self.suicide_winners.clear()
         self.last_don_successor_id = None
+        self.pending_last_words.clear()
+        self.used_last_words.clear()
+        self.last_words_log.clear()
+        self.phase_started_at = None
+        self.phase_duration_seconds = None
+        self.stats_recorded = False
 
     def extend_registration(self) -> None:
         self.registration_extensions += 1
@@ -269,6 +281,12 @@ class GameRoom:
         self.mistress_target_id = None
         self.bum_target_id = None
         self.night_reports.clear()
+        self.pending_last_words.clear()
+        self.used_last_words.clear()
+        self.last_words_log.clear()
+        self.phase_started_at = None
+        self.phase_duration_seconds = None
+        self.stats_recorded = False
         self.started_at = datetime.now()
 
     @staticmethod
@@ -569,12 +587,13 @@ class GameRoom:
         self.announced_night_roles.clear()
         self.night_kill_sources.clear()
         self.day_silenced_user_id = None
-        self.day_silenced_user_id = None
         self.doctor_target_id = None
         self.commissar_target_id = None
         self.maniac_target_id = None
         self.mistress_target_id = None
         self.bum_target_id = None
+        self.phase_started_at = None
+        self.phase_duration_seconds = None
 
     def end_day_no_lynch(self) -> tuple[bool, str]:
         if self.phase != PHASE_DAY:
@@ -867,6 +886,33 @@ class GameRoom:
 
     def add_night_report_line(self, user_id: int, line: str) -> None:
         self.night_reports.setdefault(user_id, []).append(line)
+
+    def queue_last_words(self, players: list[Player]) -> list[int]:
+        queued: list[int] = []
+        for player in players:
+            if player.user_id in self.used_last_words:
+                continue
+            if player.user_id in self.pending_last_words:
+                continue
+            self.pending_last_words.add(player.user_id)
+            queued.append(player.user_id)
+        return queued
+
+    def can_send_last_word(self, user_id: int) -> bool:
+        return user_id in self.pending_last_words
+
+    def consume_last_word(self, user_id: int, text: str) -> tuple[bool, str]:
+        if user_id not in self.pending_last_words:
+            return False, "Для тебя нет активного предсмертного слова."
+
+        cleaned = text.strip()
+        if not cleaned:
+            return False, "Предсмертное сообщение не может быть пустым."
+
+        self.pending_last_words.remove(user_id)
+        self.used_last_words.add(user_id)
+        self.last_words_log[user_id] = cleaned
+        return True, cleaned
 
     def set_day_vote(self, voter_user_id: int, target_user_id: int) -> tuple[bool, str]:
         if self.phase != PHASE_DAY:
