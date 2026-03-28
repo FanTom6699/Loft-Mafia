@@ -97,7 +97,7 @@ ROLE_ACTION_RULES = {
 
 def role_card_text(role: str, chat_title: str) -> str:
     emoji = ROLE_EMOJI.get(role, "")
-    header = f"{emoji} {role}".strip()
+    header = f"{emoji} <b>{role}</b>".strip()
     description = ROLE_DESCRIPTION.get(role, "У этой роли пока нет описания.")
     action_rule = ROLE_ACTION_RULES.get(role, "Механика роли пока не добавлена.")
     return (
@@ -175,7 +175,7 @@ class GameRoom:
         # Возвращает явный текст роли для проверки комиссаром
         role = checked_player.role
         emoji = ROLE_EMOJI.get(role, "")
-        return f"{checked_player.full_name}: {emoji} {role}"
+        return f"{checked_player.full_name}: {emoji} <b>{role}</b>"
     chat_title: str = ""
     players: dict[int, Player] = field(default_factory=dict)
     started: bool = False
@@ -204,6 +204,7 @@ class GameRoom:
     pending_last_words: set[int] = field(default_factory=set)
     used_last_words: set[int] = field(default_factory=set)
     last_words_log: dict[int, str] = field(default_factory=dict)
+    last_doctor_saved_target_id: int | None = None
     phase_started_at: datetime | None = None
     phase_duration_seconds: int | None = None
     stats_recorded: bool = False
@@ -735,6 +736,7 @@ class GameRoom:
             return False, "Сейчас не ночь.", [], None, None
 
         self.night_reports.clear()
+        self.last_doctor_saved_target_id = None
         self.day_silenced_user_id = None
 
         mistress = next((p for p in self.alive_players() if p.role == ROLE_MISTRESS), None)
@@ -815,6 +817,7 @@ class GameRoom:
                 continue
 
             if doctor_target_id == target.user_id:
+                self.last_doctor_saved_target_id = target.user_id
                 continue
             if target.role == ROLE_LUCKY and random.random() < 0.5:
                 continue
@@ -1009,7 +1012,7 @@ class GameRoom:
 
         parts = []
         for role, count in sorted(counts.items()):
-            parts.append(f"{ROLE_EMOJI.get(role, '')} {role} x{count}".strip())
+            parts.append(f"{ROLE_EMOJI.get(role, '')} <b>{role}</b> x{count}".strip())
         return "Кто-то из них:\n" + "\n".join(parts)
 
     def alive_players_text(self) -> str:
@@ -1027,7 +1030,7 @@ class GameRoom:
         if not roles:
             return ""
 
-        parts = [f"{ROLE_EMOJI.get(role, '')} {role}".strip() for role in sorted(roles)]
+        parts = [f"{ROLE_EMOJI.get(role, '')} <b>{role}</b>".strip() for role in sorted(roles)]
         return (
             "Кто-то из них:\n"
             + ", ".join(parts)
@@ -1060,11 +1063,11 @@ class GameRoom:
 
         lines = ["Игра окончена!", f"Победили: {winner}", "", "Победители:"]
         for p in winners:
-            lines.append(f"  {p.full_name} - {ROLE_EMOJI.get(p.role, '')} {p.role}".rstrip())
+            lines.append(f"  {p.full_name} - {ROLE_EMOJI.get(p.role, '')} <b>{p.role}</b>".rstrip())
 
         lines.extend(["", "Остальные участники:"])
         for p in others:
-            lines.append(f"  {p.full_name} - {ROLE_EMOJI.get(p.role, '')} {p.role}".rstrip())
+            lines.append(f"  {p.full_name} - {ROLE_EMOJI.get(p.role, '')} <b>{p.role}</b>".rstrip())
 
         if self.suicide_winners:
             lines.extend(["", "Личная победа самоубийцы:"])

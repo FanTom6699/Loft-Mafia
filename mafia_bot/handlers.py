@@ -108,6 +108,11 @@ def remove_room_state(chat_id: int) -> None:
     repo.delete_room(chat_id)
 
 
+def role_mark_text(role: str) -> str:
+    emoji = ROLE_EMOJI.get(role, "")
+    return f"{emoji} <b>{role}</b>".strip()
+
+
 def track_action_menu_message(chat_id: int, user_id: int, message_id: int) -> None:
     by_chat = action_menu_messages.setdefault(chat_id, {})
     by_chat[user_id] = message_id
@@ -240,9 +245,13 @@ def format_killer_sources_text(sources: list[str]) -> str:
     # Keep source order but remove duplicates.
     unique_labels = list(dict.fromkeys(labels))
     if len(unique_labels) == 1:
-        return f"Причина: атака со стороны {unique_labels[0]}."
+        if unique_labels[0] == "👑 Дон":
+            return "Говорят, к нему заходил 👑 Дон."
+        if unique_labels[0] == "🔪 Маньяк":
+            return "Говорят, к нему заходил 🔪 Маньяк."
+        return f"Говорят, к нему заходил {unique_labels[0]}."
 
-    return "Причина: на жертву пришли " + " и ".join(unique_labels) + "."
+    return "Говорят, к нему заходили " + " и ".join(unique_labels) + "."
 
 
 def registration_remaining_seconds(room) -> int:
@@ -348,15 +357,6 @@ async def launch_game_from_registration(bot: Bot, room, chat_id: int, chat_title
     # Small pause so players can read their role card before the night UI arrives.
     await asyncio.sleep(1)
 
-    try:
-        await send_phase_media(bot, chat_id, room.night_media_caption(), NIGHT_IMAGE_PATH)
-    except Exception as e:
-        print(f"[ERROR] send_phase_media: {e!r}")
-        try:
-            await bot.send_message(chat_id, room.night_media_caption())
-        except Exception as e2:
-            print(f"[ERROR] send_message(night_media_caption): {e2!r}")
-
     keyboard: InlineKeyboardMarkup | None = None
     try:
         keyboard = await night_action_keyboard(bot)
@@ -365,28 +365,18 @@ async def launch_game_from_registration(bot: Bot, room, chat_id: int, chat_title
         keyboard = None
 
     try:
-        await bot.send_message(
-            chat_id,
-            (
-                "Наступает ночь.\n"
-                f"Живых игроков: {len(room.alive_players())}.\n"
-                f"До рассвета осталось: {NIGHT_PHASE_SECONDS} сек."
-            ),
-            reply_markup=keyboard,
-        )
+        await send_phase_media(bot, chat_id, room.night_media_caption(), NIGHT_IMAGE_PATH, reply_markup=keyboard)
+    except Exception as e:
+        print(f"[ERROR] send_phase_media: {e!r}")
+        try:
+            await bot.send_message(chat_id, room.night_media_caption())
+        except Exception as e2:
+            print(f"[ERROR] send_message(night_media_caption): {e2!r}")
+
+    try:
+        await bot.send_message(chat_id, night_status_text(room))
     except Exception as e:
         print(f"[ERROR] send_message(Живых игроков): {e!r}")
-
-    try:
-        await bot.send_message(chat_id, "Ночные действия выполняются в личке бота. Меню отправляю прямо сейчас.")
-    except Exception as e:
-        print(f"[ERROR] send_message(Роли делают свой выбор): {e!r}")
-
-    try:
-        await bot.send_message(chat_id, room.alive_players_text())
-        await bot.send_message(chat_id, room.alive_role_counts_text())
-    except Exception as e:
-        print(f"[ERROR] send_message(alive_players/role_counts): {e!r}")
 
     try:
         await start_phase_timer(room, bot)
@@ -477,6 +467,7 @@ def format_player_stats_text(stats: dict) -> str:
     civilian_games = int(stats.get("civilian_games", 0))
     last_role = str(stats.get("last_role", "") or "-")
     name = str(stats.get("display_name", "Игрок"))
+    last_role_mark = role_mark_text(last_role) if last_role != "-" else "-"
 
     win_rate = (wins / games * 100.0) if games > 0 else 0.0
     survival_rate = (survived / games * 100.0) if games > 0 else 0.0
@@ -493,7 +484,7 @@ def format_player_stats_text(stats: dict) -> str:
         f"Партий за мафию: {mafia_games}\n"
         f"Партий за маньяка: {maniac_games}\n"
         f"Партий за мирных: {civilian_games}\n"
-        f"Последняя роль: {last_role}"
+        f"Последняя роль: {last_role_mark}"
     )
 
 
@@ -929,6 +920,15 @@ def build_action_prompt_text(room, actor_user_id: int) -> str:
     return "Выбери действие на текущую фазу:"
 
 
+def night_status_text(room) -> str:
+    alive = room.alive_players()
+    lines = ["Живые игроки:"]
+    for i, player in enumerate(alive, start=1):
+        lines.append(f"{i}. {player.full_name}")
+    lines.append(f"\nСпать осталось {NIGHT_PHASE_SECONDS} сек.")
+    return "\n".join(lines)
+
+
 async def refresh_private_action_message(callback: CallbackQuery, room, actor_user_id: int, status_text: str | None = None) -> None:
     keyboard = build_action_keyboard(room, actor_user_id)
     if keyboard is None:
@@ -990,25 +990,16 @@ async def push_phase_action_menus(bot: Bot, room) -> None:
 
 
 async def push_trial_vote_menus(bot: Bot, room, candidate_name: str) -> None:
-    print(f"[TRIAL] push_trial_vote_menus: candidate={candidate_name}, players={[p.user_id for p in room.alive_players()]}")
+    print(f"[TRIAL] push_trial_vote_menus: candidate={candidate_name}, chat_id={room.chat_id}")
     yes_count, no_count = room.trial_vote_counts()
-    for player in room.alive_players():
-        try:
-            print(f"[TRIAL] Sending trial vote menu to user_id={player.user_id}, name={player.full_name}")
-            await bot.send_message(
-                player.user_id,
-                (
-                    f"Голосование за/против: кандидат {candidate_name}.\n"
-                    "Выбери вариант кнопкой ниже:"
-                ),
-                reply_markup=trial_vote_keyboard(room.chat_id, yes_count, no_count),
-            )
-        except Exception as e:
-            print(f"[ERROR] push_trial_vote_menus: user_id={player.user_id}, error={e!r}")
-            await bot.send_message(
-                room.chat_id,
-                f"Не смог отправить голосование игроку {player.full_name}."
-            )
+    try:
+        await bot.send_message(
+            room.chat_id,
+            f"Выгоняем {candidate_name}?",
+            reply_markup=trial_vote_keyboard(room.chat_id, yes_count, no_count),
+        )
+    except Exception as e:
+        print(f"[ERROR] push_trial_vote_menus: chat_id={room.chat_id}, error={e!r}")
 
 
 async def send_mafia_private_update(room, bot, text: str) -> None:
@@ -1036,7 +1027,7 @@ async def announce_don_transfer(room, bot: Bot, don_successor_id: int | None) ->
         bot,
         (
             f"👑 Власть семьи переходит к {don_name}.\n"
-            "Теперь он - 🤵🏻 Дон и принимает решающее слово мафии."
+            f"Теперь он - {role_mark_text(ROLE_DON)} и принимает решающее слово мафии."
         ),
     )
 
@@ -1092,9 +1083,12 @@ async def process_night_end(bot: Bot, chat_id: int, timer_reason: str | None = N
         if don_transfer_note:
             await announce_don_transfer(room, bot, don_successor_id)
 
+        if room.last_doctor_saved_target_id is not None:
+            await bot.send_message(chat_id, "👨🏼‍⚕️ Доктор спас кого-то от смерти.")
+
         if eliminated:
             for dead in eliminated:
-                role_text = f"{ROLE_EMOJI.get(dead.role, '')} {dead.role}".strip()
+                role_text = role_mark_text(dead.role)
                 sources = kill_sources.get(dead.user_id, [])
                 killer_text = format_killer_sources_text(sources)
                 text = f"Сегодня был жестоко убит {role_text} {dead.full_name}..."
@@ -1106,7 +1100,6 @@ async def process_night_end(bot: Bot, chat_id: int, timer_reason: str | None = N
             await bot.send_message(chat_id, "🌙 Этой ночью было тихо. Никто не погиб.")
 
         await bot.send_message(chat_id, room.alive_players_text())
-        await bot.send_message(chat_id, room.alive_role_counts_text())
 
         if room.phase == PHASE_FINISHED:
             ensure_stats_recorded(room)
@@ -1211,14 +1204,17 @@ async def process_day_end(bot: Bot, chat_id: int, timer_reason: str | None = Non
                 print(f"[PHASE] process_day_end: end_day_no_lynch result for chat_id={chat_id}, ok_end={ok_end}, info={info_end}")
                 if ok_end:
                     await bot.send_message(chat_id, "Сегодня решили никого не вешать.")
-                    await send_phase_media(bot, chat_id, room.night_media_caption(), NIGHT_IMAGE_PATH)
                     keyboard = await night_action_keyboard(bot)
+                    await send_phase_media(
+                        bot,
+                        chat_id,
+                        room.night_media_caption(),
+                        NIGHT_IMAGE_PATH,
+                        reply_markup=keyboard,
+                    )
                     await bot.send_message(
                         chat_id,
-                        (
-                            f"Живых игроков: {len(room.alive_players())}. До рассвета {NIGHT_PHASE_SECONDS} сек."
-                        ),
-                        reply_markup=keyboard,
+                        night_status_text(room),
                     )
                     await push_phase_action_menus(bot, room)
                     await start_phase_timer(room, bot)
@@ -1234,12 +1230,17 @@ async def process_day_end(bot: Bot, chat_id: int, timer_reason: str | None = Non
                 await bot.send_message(chat_id, "Кандидат не найден. День завершается без повешения.")
                 ok_end, _ = room.end_day_no_lynch()
                 if ok_end:
-                    await send_phase_media(bot, chat_id, room.night_media_caption(), NIGHT_IMAGE_PATH)
                     keyboard = await night_action_keyboard(bot)
+                    await send_phase_media(
+                        bot,
+                        chat_id,
+                        room.night_media_caption(),
+                        NIGHT_IMAGE_PATH,
+                        reply_markup=keyboard,
+                    )
                     await bot.send_message(
                         chat_id,
-                        f"Живых игроков: {len(room.alive_players())}. До рассвета {NIGHT_PHASE_SECONDS} сек.",
-                        reply_markup=keyboard,
+                        night_status_text(room),
                     )
                     await push_phase_action_menus(bot, room)
                     await start_phase_timer(room, bot)
@@ -1250,13 +1251,6 @@ async def process_day_end(bot: Bot, chat_id: int, timer_reason: str | None = Non
             room.start_day_trial(candidate.user_id)
             print(f"[PHASE] process_day_end: trial started for chat_id={chat_id}, candidate_id={candidate.user_id}, candidate_name={candidate.full_name}")
             persist_room(room)
-            await bot.send_message(
-                chat_id,
-                (
-                    f"На повешение вынесен игрок: {candidate.full_name}.\n"
-                    "Голосование за/против отправлено игрокам в ЛС бота."
-                ),
-            )
             await push_trial_vote_menus(bot, room, candidate.full_name)
             await bot.send_message(chat_id, f"Время голосования за/против: {DAY_TRIAL_SECONDS} сек.")
             await start_phase_timer(room, bot)
@@ -1271,12 +1265,17 @@ async def process_day_end(bot: Bot, chat_id: int, timer_reason: str | None = Non
                 print(f"[PHASE] process_day_end: trial resolve failed for chat_id={chat_id}, info={info}")
                 await bot.send_message(chat_id, info)
                 return
-            await bot.send_message(chat_id, f"Итоги голосования: за {yes_count}, против {no_count}.")
+            await bot.send_message(chat_id, f"Результаты голосования: за {yes_count}, против {no_count}.")
+            await asyncio.sleep(1)
 
             if eliminated:
                 first = eliminated[0]
-                role_text = f"{ROLE_EMOJI.get(first.role, '')} {first.role}".strip()
-                await bot.send_message(chat_id, f"Игрок повешен: {first.full_name} ({role_text}).")
+                role_text = role_mark_text(first.role)
+                alive_voters_count = len(room.alive_players()) + len(eliminated)
+                if yes_count == alive_voters_count:
+                    await bot.send_message(chat_id, f"Все согласились. Выгоняем {first.full_name} ({role_text}).")
+                else:
+                    await bot.send_message(chat_id, f"Выгоняем {first.full_name} ({role_text}).")
                 try:
                     await bot.send_message(
                         first.user_id,
@@ -1285,13 +1284,13 @@ async def process_day_end(bot: Bot, chat_id: int, timer_reason: str | None = Non
                 except Exception:
                     pass
                 if first.role == "Самоубийца":
-                    await bot.send_message(chat_id, "Самоубийца выполнил личную цель победы.")
+                    await bot.send_message(chat_id, "<b>Самоубийца</b> выполнил личную цель победы.")
                 if first.role == "Камикадзе" and len(eliminated) > 1:
                     second = eliminated[1]
-                    second_role = f"{ROLE_EMOJI.get(second.role, '')} {second.role}".strip()
+                    second_role = role_mark_text(second.role)
                     await bot.send_message(chat_id, f"Камикадзе забрал с собой {second.full_name} ({second_role}).")
             else:
-                await bot.send_message(chat_id, "Большинство решило оставить игрока в живых.")
+                await bot.send_message(chat_id, "Игрок остается в игре.")
 
             if don_transfer_note:
                 await announce_don_transfer(room, bot, don_successor_id)
@@ -1304,12 +1303,17 @@ async def process_day_end(bot: Bot, chat_id: int, timer_reason: str | None = Non
                 persist_room(room)
                 return
 
-            await send_phase_media(bot, chat_id, room.night_media_caption(), NIGHT_IMAGE_PATH)
             keyboard = await night_action_keyboard(bot)
+            await send_phase_media(
+                bot,
+                chat_id,
+                room.night_media_caption(),
+                NIGHT_IMAGE_PATH,
+                reply_markup=keyboard,
+            )
             await bot.send_message(
                 chat_id,
-                f"Живых игроков: {len(room.alive_players())}. До рассвета {NIGHT_PHASE_SECONDS} сек.",
-                reply_markup=keyboard,
+                night_status_text(room),
             )
             await push_phase_action_menus(bot, room)
             await start_phase_timer(room, bot)
@@ -1443,7 +1447,7 @@ def mafia_allies_text(room) -> str:
 
     lines = ["", "Запомни своих союзников:"]
     for ally in allies:
-        role_mark = f"{ROLE_EMOJI.get(ally.role, '')} {ally.role}".strip()
+        role_mark = role_mark_text(ally.role)
         lines.append(f"  {ally.full_name} - {role_mark}")
     return "\n".join(lines)
 
@@ -1585,7 +1589,7 @@ async def cmd_profile(message: Message) -> None:
         await message.answer("Профиль не найден.", reply_markup=private_back_to_menu_keyboard())
         return
 
-    role_mark = f"{ROLE_EMOJI.get(player.role, '')} {player.role}".strip()
+    role_mark = role_mark_text(player.role)
     alive_text = "в игре" if player.alive else "выбыл"
     await message.answer(
         "<b>Твой профиль</b>\n"
@@ -1964,6 +1968,10 @@ async def on_trial_callback(callback: CallbackQuery) -> None:
         await callback.answer("Сейчас нет активного голосования за/против.", show_alert=True)
         return
 
+    if callback.message.chat.id != room.chat_id:
+        await callback.answer("Голосование проходит в групповом чате.", show_alert=True)
+        return
+
     voter = room.get_player(callback.from_user.id)
     if voter is None or not voter.alive:
         await callback.answer("Ты не участвуешь в этом голосовании.", show_alert=True)
@@ -1976,18 +1984,14 @@ async def on_trial_callback(callback: CallbackQuery) -> None:
         return
     persist_room(room)
 
-    # Update DM message after vote
+    # Update shared group vote message after vote
     yes_count, no_count = room.trial_vote_counts()
     candidate = room.get_player(room.trial_candidate_id) if room.trial_candidate_id is not None else None
     candidate_name = candidate.full_name if candidate is not None else "кандидат"
     choice_text = "ЗА" if approve else "ПРОТИВ"
     try:
         await callback.message.edit_text(
-            (
-                f"Голосование за/против: кандидат {candidate_name}.\n"
-                "Выбери вариант кнопкой ниже:\n\n"
-                f"Твой выбор: {choice_text}"
-            ),
+            f"Выгоняем {candidate_name}?",
             reply_markup=trial_vote_keyboard(chat_id, yes_count, no_count),
         )
     except Exception:
@@ -2049,7 +2053,7 @@ async def on_action_callback(callback: CallbackQuery) -> None:
             return
         if not room.mark_night_role_announced(role_name):
             return
-        role_mark = f"{ROLE_EMOJI.get(role_name, '')} {role_name}".strip()
+        role_mark = role_mark_text(role_name)
         await callback.bot.send_message(room.chat_id, f"{role_mark} сделал ночной ход.")
 
     if action == "kill":
@@ -2059,7 +2063,7 @@ async def on_action_callback(callback: CallbackQuery) -> None:
             actor = room.get_player(callback.from_user.id)
             target = room.get_player(target_id)
             if actor is not None and target is not None:
-                role_mark = f"{ROLE_EMOJI.get(actor.role, '')} {actor.role}".strip()
+                role_mark = role_mark_text(actor.role)
                 await send_mafia_private_update(
                     room,
                     callback.bot,
@@ -2275,7 +2279,7 @@ async def on_private_menu_callback(callback: CallbackQuery) -> None:
             await show_menu_screen("Профиль не найден.", private_back_to_menu_keyboard())
             await callback.answer()
             return
-        role_mark = f"{ROLE_EMOJI.get(player.role, '')} {player.role}".strip()
+        role_mark = role_mark_text(player.role)
         alive_text = "в игре" if player.alive else "выбыл"
         await show_menu_screen(
             "<b>Твой профиль</b>\n"
