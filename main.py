@@ -12,20 +12,10 @@ from mafia_bot.handlers import restore_runtime_state, router
 
 async def setup_bot_commands(bot: Bot) -> None:
     group_commands = [
-        BotCommand(command="start", description="Список команд"),
-        BotCommand(command="panel", description="Панель регистрации"),
         BotCommand(command="create", description="Создать лобби"),
-        BotCommand(command="join", description="Войти в лобби"),
-        BotCommand(command="leave", description="Выйти из лобби"),
-        BotCommand(command="lobby", description="Показать лобби"),
         BotCommand(command="extend", description="Продлить регистрацию"),
         BotCommand(command="begin", description="Старт игры вручную"),
-        BotCommand(command="status", description="Статус игры"),
-        BotCommand(command="night_end", description="Завершить ночь вручную"),
-        BotCommand(command="day_end", description="Завершить день вручную"),
-        BotCommand(command="roles", description="Список ролей"),
-        BotCommand(command="stats", description="Твоя статистика"),
-        BotCommand(command="close", description="Закрыть лобби"),
+        BotCommand(command="close", description="Отменить регистрацию/игру"),
     ]
     private_commands = [
         BotCommand(command="start", description="Главное меню"),

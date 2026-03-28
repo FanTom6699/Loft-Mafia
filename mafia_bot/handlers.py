@@ -386,6 +386,14 @@ async def notify_registration_blocked(bot: Bot, chat_id: int, user_id: int) -> N
         return
 
 
+async def is_group_admin(bot: Bot, chat_id: int, user_id: int) -> bool:
+    try:
+        member = await bot.get_chat_member(chat_id, user_id)
+    except Exception:
+        return False
+    return member.status in {"administrator", "creator"}
+
+
 async def process_rule_violation(message: Message) -> None:
     if message.from_user is None:
         return
@@ -1195,19 +1203,11 @@ async def cmd_start(message: Message, command: CommandObject) -> None:
     text = (
         "Привет. Это бот для игры в Мафию.\n\n"
         "Команды:\n"
-        "/panel - кнопки управления регистрацией\n"
         "/create - создать лобби\n"
-        "/join - войти в лобби\n"
-        "/leave - выйти из лобби\n"
-        "/lobby - показать игроков\n"
         "/extend - продлить регистрацию\n"
         "/begin - начать игру вручную\n"
-        "/roles - список ролей и описаний\n"
-        "/stats - твоя накопленная статистика\n"
-        "/status - статус текущей игры\n"
-        "/night_end - завершить ночь вручную\n"
-        "/day_end - завершить день вручную\n"
-        "/close - закрыть лобби"
+        "/close - отменить регистрацию/игру\n\n"
+        "Вход в лобби: только через inline-кнопку Зарегистрироваться."
     )
     await message.answer(text)
 
@@ -1327,29 +1327,7 @@ async def cmd_create(message: Message) -> None:
 
 @router.message(Command("join"))
 async def cmd_join(message: Message) -> None:
-    if is_user_blocked(message.chat.id, message.from_user.id):
-        await notify_registration_blocked(message.bot, message.chat.id, message.from_user.id)
-        await message.answer("Ты не можешь войти в лобби, пока действует мут. Проверь ЛС бота.")
-        return
-
-    room = storage.get_room(message.chat.id)
-    if room is None:
-        await message.answer("Сначала создай лобби: /create")
-        return
-
-    if not room.registration_open:
-        await message.answer("Регистрация закрыта.")
-        return
-
-    ok, info = room.add_player(message.from_user.id, user_nickname(message.from_user))
-    if not ok:
-        await message.answer(info)
-        return
-    persist_room(room)
-
-    await message.answer("Ты вошел в лобби.")
-    await message.answer(room.lobby_text())
-    await refresh_registration_post(message, room)
+    await message.answer("Вход в лобби только через inline-кнопку Зарегистрироваться под постом лобби.")
 
 
 @router.message(Command("leave"))
@@ -1533,6 +1511,9 @@ async def on_registration_action(callback: CallbackQuery) -> None:
         if room.started:
             await callback.answer("Игра уже началась.", show_alert=True)
             return
+        if not await is_group_admin(callback.bot, chat_id, callback.from_user.id):
+            await callback.answer("Отменять игру может только админ группы.", show_alert=True)
+            return
         cancel_phase_timer(chat_id)
         cancel_registration_timer(chat_id)
         clear_chat_penalties(chat_id)
@@ -1544,6 +1525,9 @@ async def on_registration_action(callback: CallbackQuery) -> None:
         return
 
     if action == "cancel":
+        if not await is_group_admin(callback.bot, chat_id, callback.from_user.id):
+            await callback.answer("Отменять игру может только админ группы.", show_alert=True)
+            return
         cancel_phase_timer(chat_id)
         cancel_registration_timer(chat_id)
         clear_chat_penalties(chat_id)
@@ -2033,6 +2017,10 @@ async def cmd_close(message: Message) -> None:
     room = storage.get_room(message.chat.id)
     if room is None:
         await message.answer("Лобби не найдено.")
+        return
+
+    if not await is_group_admin(message.bot, message.chat.id, message.from_user.id):
+        await message.answer("Отменять игру может только админ группы.")
         return
 
     cancel_phase_timer(message.chat.id)
