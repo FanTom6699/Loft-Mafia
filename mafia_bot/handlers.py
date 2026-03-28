@@ -301,7 +301,7 @@ async def launch_game_from_registration(bot: Bot, room, chat_id: int, chat_title
         await bot.send_message(
             chat_id,
             "Игра начинается!\n\n"
-            "В течение нескольких секунд бот пришлет вам в ЛС роль и меню действий.",
+            "Сначала бот разошлет роли в личные сообщения, затем объявит начало ночи.",
         )
     except Exception as e:
         print(f"[ERROR] send_message(Игра начинается): {e!r}")
@@ -341,6 +341,14 @@ async def launch_game_from_registration(bot: Bot, room, chat_id: int, chat_title
                 print(f"[ERROR] send_message(Не смог отправить роли): {e!r}")
 
     try:
+        await send_role_cards()
+    except Exception as e:
+        print(f"[ERROR] send_role_cards: {e!r}")
+
+    # Small pause so players can read their role card before the night UI arrives.
+    await asyncio.sleep(1)
+
+    try:
         await send_phase_media(bot, chat_id, room.night_media_caption(), NIGHT_IMAGE_PATH)
     except Exception as e:
         print(f"[ERROR] send_phase_media: {e!r}")
@@ -359,14 +367,18 @@ async def launch_game_from_registration(bot: Bot, room, chat_id: int, chat_title
     try:
         await bot.send_message(
             chat_id,
-            f"Живых игроков: {len(room.alive_players())}. До рассвета {NIGHT_PHASE_SECONDS} сек.",
+            (
+                "Наступает ночь.\n"
+                f"Живых игроков: {len(room.alive_players())}.\n"
+                f"До рассвета осталось: {NIGHT_PHASE_SECONDS} сек."
+            ),
             reply_markup=keyboard,
         )
     except Exception as e:
         print(f"[ERROR] send_message(Живых игроков): {e!r}")
 
     try:
-        await bot.send_message(chat_id, "Роли делают свой выбор в личке бота. Меню разослано автоматически.")
+        await bot.send_message(chat_id, "Ночные действия выполняются в личке бота. Меню отправляю прямо сейчас.")
     except Exception as e:
         print(f"[ERROR] send_message(Роли делают свой выбор): {e!r}")
 
@@ -380,17 +392,11 @@ async def launch_game_from_registration(bot: Bot, room, chat_id: int, chat_title
         await start_phase_timer(room, bot)
     except Exception as e:
         print(f"[ERROR] start_phase_timer: {e!r}")
+
     try:
-        results = await asyncio.gather(
-            send_role_cards(),
-            push_phase_action_menus(bot, room),
-            return_exceptions=True,
-        )
-        for result in results:
-            if isinstance(result, Exception):
-                print(f"[ERROR] gather result: {result!r}")
+        await push_phase_action_menus(bot, room)
     except Exception as e:
-        print(f"[ERROR] gather(send_role_cards, push_phase_action_menus): {e!r}")
+        print(f"[ERROR] push_phase_action_menus: {e!r}")
 
 
 async def process_registration_timeout(bot: Bot, chat_id: int) -> None:
@@ -718,6 +724,22 @@ def registration_panel() -> InlineKeyboardMarkup:
     )
 
 
+def private_main_menu_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="Профиль", callback_data="pmenu:profile")],
+            [InlineKeyboardButton(text="Список ролей", callback_data="pmenu:roles")],
+            [InlineKeyboardButton(text="Статистика", callback_data="pmenu:stats")],
+        ]
+    )
+
+
+def private_back_to_menu_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[[InlineKeyboardButton(text="⬅️ В меню", callback_data="pmenu:main")]]
+    )
+
+
 def get_private_action_room(user_id: int):
     active_rooms = []
     for room in storage.rooms.values():
@@ -905,6 +927,22 @@ def build_action_prompt_text(room, actor_user_id: int) -> str:
         return "🏙 День. Выбери кандидата на повешение или пропусти голосование:"
 
     return "Выбери действие на текущую фазу:"
+
+
+async def refresh_private_action_message(callback: CallbackQuery, room, actor_user_id: int, status_text: str | None = None) -> None:
+    keyboard = build_action_keyboard(room, actor_user_id)
+    if keyboard is None:
+        return
+
+    prompt = build_action_prompt_text(room, actor_user_id)
+    text = prompt if not status_text else f"{prompt}\n\n{status_text}"
+    try:
+        await callback.message.edit_text(text, reply_markup=keyboard)
+    except Exception:
+        try:
+            await callback.message.edit_reply_markup(reply_markup=keyboard)
+        except Exception:
+            pass
 
 
 async def send_action_menu(message: Message) -> None:
@@ -1141,6 +1179,34 @@ async def process_day_end(bot: Bot, chat_id: int, timer_reason: str | None = Non
 
             if candidate_id is None:
                 print(f"[PHASE] process_day_end: no single candidate selected, ending day without lynch for chat_id={chat_id}")
+                votes_by_target: dict[int, int] = {}
+                for target_id in room.day_votes.values():
+                    target = room.get_player(target_id)
+                    if target is None or not target.alive:
+                        continue
+                    votes_by_target[target.user_id] = votes_by_target.get(target.user_id, 0) + 1
+
+                if votes_by_target:
+                    sorted_votes = sorted(votes_by_target.items(), key=lambda item: item[1], reverse=True)
+                    vote_lines: list[str] = []
+                    for target_id, count in sorted_votes:
+                        target = room.get_player(target_id)
+                        if target is None:
+                            continue
+                        vote_lines.append(f"- {target.full_name}: {count}")
+                    if vote_lines:
+                        await bot.send_message(
+                            chat_id,
+                            "Этап номинации завершен без единого кандидата: несколько лидеров набрали одинаковый максимум.\\n"
+                            "Итоги голосования:\\n"
+                            + "\\n".join(vote_lines),
+                        )
+                else:
+                    await bot.send_message(
+                        chat_id,
+                        "Этап номинации завершен без кандидата: не получено ни одного действительного голоса.",
+                    )
+
                 ok_end, info_end = room.end_day_no_lynch()
                 print(f"[PHASE] process_day_end: end_day_no_lynch result for chat_id={chat_id}, ok_end={ok_end}, info={info_end}")
                 if ok_end:
@@ -1363,7 +1429,7 @@ async def maybe_finish_phase_early(bot: Bot, room) -> None:
         return
 
     if room.phase == "day" and room.day_stage == DAY_STAGE_NOMINATION and room.all_alive_day_voted():
-        await process_day_end(bot, room.chat_id, timer_reason="⚡ Все выбрали кандидата. Переходим к голосованию за/против.")
+        await process_day_end(bot, room.chat_id, timer_reason="⚡ Все игроки проголосовали на этапе номинации. Подводим итоги.")
         return
 
     if room.phase == "day" and room.day_stage == DAY_STAGE_TRIAL and room.all_alive_trial_voted():
@@ -1440,13 +1506,7 @@ async def cmd_start(message: Message, command: CommandObject) -> None:
         return
 
     if message.chat.type == "private":
-        keyboard = InlineKeyboardMarkup(
-            inline_keyboard=[
-                [InlineKeyboardButton(text="Профиль", callback_data="pmenu:profile")],
-                [InlineKeyboardButton(text="Список ролей", callback_data="pmenu:roles")],
-                [InlineKeyboardButton(text="Статистика", callback_data="pmenu:stats")],
-            ]
-        )
+        keyboard = private_main_menu_keyboard()
         if is_private_first_visit:
             text = (
                 "<b>Добро пожаловать в бота Мафии</b>\n\n"
@@ -1482,6 +1542,9 @@ async def cmd_start(message: Message, command: CommandObject) -> None:
 
 @router.message(Command("roles"))
 async def cmd_roles(message: Message) -> None:
+    if message.chat.type == "private":
+        await message.answer(all_roles_info_text(), reply_markup=private_back_to_menu_keyboard())
+        return
     await message.answer(all_roles_info_text())
 
 
@@ -1489,7 +1552,16 @@ async def cmd_roles(message: Message) -> None:
 async def cmd_stats(message: Message) -> None:
     stats = repo.get_player_stats(message.from_user.id)
     if stats is None:
+        if message.chat.type == "private":
+            await message.answer(
+                "Пока нет сохраненной статистики. Сыграй хотя бы одну завершенную партию.",
+                reply_markup=private_back_to_menu_keyboard(),
+            )
+            return
         await message.answer("Пока нет сохраненной статистики. Сыграй хотя бы одну завершенную партию.")
+        return
+    if message.chat.type == "private":
+        await message.answer(format_player_stats_text(stats), reply_markup=private_back_to_menu_keyboard())
         return
     await message.answer(format_player_stats_text(stats))
 
@@ -1502,12 +1574,15 @@ async def cmd_profile(message: Message) -> None:
 
     room = get_player_profile_room(message.from_user.id)
     if room is None:
-        await message.answer("Нет активной партии, где ты участвуешь. Профиль роли появится во время игры.")
+        await message.answer(
+            "Нет активной партии, где ты участвуешь. Профиль роли появится во время игры.",
+            reply_markup=private_back_to_menu_keyboard(),
+        )
         return
 
     player = room.get_player(message.from_user.id)
     if player is None:
-        await message.answer("Профиль не найден.")
+        await message.answer("Профиль не найден.", reply_markup=private_back_to_menu_keyboard())
         return
 
     role_mark = f"{ROLE_EMOJI.get(player.role, '')} {player.role}".strip()
@@ -1516,7 +1591,8 @@ async def cmd_profile(message: Message) -> None:
         "<b>Твой профиль</b>\n"
         f"Чат: {room.chat_title or room.chat_id}\n"
         f"Статус: {alive_text}\n"
-        f"Роль: {role_mark}"
+        f"Роль: {role_mark}",
+        reply_markup=private_back_to_menu_keyboard(),
     )
 
 
@@ -1900,16 +1976,28 @@ async def on_trial_callback(callback: CallbackQuery) -> None:
         return
     persist_room(room)
 
-    # Update DM menu after vote
+    # Update DM message after vote
     yes_count, no_count = room.trial_vote_counts()
+    candidate = room.get_player(room.trial_candidate_id) if room.trial_candidate_id is not None else None
+    candidate_name = candidate.full_name if candidate is not None else "кандидат"
+    choice_text = "ЗА" if approve else "ПРОТИВ"
     try:
-        await callback.message.edit_reply_markup(reply_markup=trial_vote_keyboard(chat_id, yes_count, no_count))
+        await callback.message.edit_text(
+            (
+                f"Голосование за/против: кандидат {candidate_name}.\n"
+                "Выбери вариант кнопкой ниже:\n\n"
+                f"Твой выбор: {choice_text}"
+            ),
+            reply_markup=trial_vote_keyboard(chat_id, yes_count, no_count),
+        )
     except Exception:
-        pass
+        try:
+            await callback.message.edit_reply_markup(reply_markup=trial_vote_keyboard(chat_id, yes_count, no_count))
+        except Exception:
+            pass
 
     # Send group message about the vote
     voter = room.get_player(callback.from_user.id)
-    candidate = room.get_player(room.trial_candidate_id) if room.trial_candidate_id is not None else None
     if voter and candidate:
         vote_text = "ЗА" if approve else "ПРОТИВ"
         await callback.bot.send_message(
@@ -1970,12 +2058,6 @@ async def on_action_callback(callback: CallbackQuery) -> None:
         if ok:
             actor = room.get_player(callback.from_user.id)
             target = room.get_player(target_id)
-            if target is not None:
-                await callback.message.answer(
-                    f"🤵 Ночной выбор принят: вы нацелились на {player_display_name(target)}."
-                )
-            else:
-                await callback.message.answer("🤵 Ночной выбор мафии принят.")
             if actor is not None and target is not None:
                 role_mark = f"{ROLE_EMOJI.get(actor.role, '')} {actor.role}".strip()
                 await send_mafia_private_update(
@@ -2000,9 +2082,11 @@ async def on_action_callback(callback: CallbackQuery) -> None:
                         room.chat_id,
                         "🤵🏻 Мафия определилась с общей целью.",
                     )
-            keyboard = build_action_keyboard(room, callback.from_user.id)
-            if keyboard is not None:
-                await callback.message.edit_reply_markup(reply_markup=keyboard)
+            if target is not None:
+                status_text = f"🤵 Ночной выбор принят: вы нацелились на {player_display_name(target)}."
+            else:
+                status_text = "🤵 Ночной выбор мафии принят."
+            await refresh_private_action_message(callback, room, callback.from_user.id, status_text)
             await maybe_finish_phase_early(callback.bot, room)
             persist_room(room)
         return
@@ -2012,16 +2096,12 @@ async def on_action_callback(callback: CallbackQuery) -> None:
         await callback.answer(info, show_alert=not ok)
         if ok:
             target = room.get_player(target_id)
-            if target is not None:
-                await callback.message.answer(
-                    f"👨🏼‍⚕️ Выбор принят: вы пошли лечить {player_display_name(target)}."
-                )
-            else:
-                await callback.message.answer("👨🏼‍⚕️ Выбор доктора принят.")
             await announce_night_role_once(actor.role)
-            keyboard = build_action_keyboard(room, callback.from_user.id)
-            if keyboard is not None:
-                await callback.message.edit_reply_markup(reply_markup=keyboard)
+            if target is not None:
+                status_text = f"👨🏼‍⚕️ Выбор принят: вы пошли лечить {player_display_name(target)}."
+            else:
+                status_text = "👨🏼‍⚕️ Выбор доктора принят."
+            await refresh_private_action_message(callback, room, callback.from_user.id, status_text)
             await maybe_finish_phase_early(callback.bot, room)
             persist_room(room)
         return
@@ -2031,16 +2111,12 @@ async def on_action_callback(callback: CallbackQuery) -> None:
         await callback.answer("Проверка принята." if ok else info, show_alert=not ok)
         if ok:
             target = room.get_player(target_id)
-            if target is not None:
-                await callback.message.answer(
-                    f"🕵️ Проверка принята: вы пошли проверять {player_display_name(target)}. Результат будет утром."
-                )
-            else:
-                await callback.message.answer("🕵️ Проверка принята. Результат будет утром.")
             await announce_night_role_once(actor.role)
-            keyboard = build_action_keyboard(room, callback.from_user.id)
-            if keyboard is not None:
-                await callback.message.edit_reply_markup(reply_markup=keyboard)
+            if target is not None:
+                status_text = f"🕵️ Проверка принята: вы пошли проверять {player_display_name(target)}. Результат будет утром."
+            else:
+                status_text = "🕵️ Проверка принята. Результат будет утром."
+            await refresh_private_action_message(callback, room, callback.from_user.id, status_text)
             await maybe_finish_phase_early(callback.bot, room)
             persist_room(room)
         return
@@ -2051,14 +2127,10 @@ async def on_action_callback(callback: CallbackQuery) -> None:
         if ok:
             target = room.get_player(target_id)
             if target is not None:
-                await callback.message.answer(
-                    f"🗳 Голос принят: вы выдвинули {player_display_name(target)}."
-                )
+                status_text = f"🗳 Голос принят: вы выдвинули {player_display_name(target)}."
             else:
-                await callback.message.answer("🗳 Твой голос принят.")
-            keyboard = build_action_keyboard(room, callback.from_user.id)
-            if keyboard is not None:
-                await callback.message.edit_reply_markup(reply_markup=keyboard)
+                status_text = "🗳 Твой голос принят."
+            await refresh_private_action_message(callback, room, callback.from_user.id, status_text)
             await maybe_finish_phase_early(callback.bot, room)
             persist_room(room)
         return
@@ -2075,15 +2147,16 @@ async def on_action_callback(callback: CallbackQuery) -> None:
 
         room.day_votes[callback.from_user.id] = 0
         await callback.answer("Пропуск голосования принят.")
-        await callback.message.answer("🗳 Ты пропустил голосование на этапе выбора кандидата.")
+        await refresh_private_action_message(
+            callback,
+            room,
+            callback.from_user.id,
+            "🗳 Вы пропустили голосование на этапе выбора кандидата.",
+        )
         await callback.bot.send_message(
             room.chat_id,
             f"{player_display_name(voter)} пропускает голосование.",
         )
-
-        keyboard = build_action_keyboard(room, callback.from_user.id)
-        if keyboard is not None:
-            await callback.message.edit_reply_markup(reply_markup=keyboard)
 
         await maybe_finish_phase_early(callback.bot, room)
         persist_room(room)
@@ -2094,16 +2167,12 @@ async def on_action_callback(callback: CallbackQuery) -> None:
         await callback.answer(info, show_alert=not ok)
         if ok:
             target = room.get_player(target_id)
-            if target is not None:
-                await callback.message.answer(
-                    f"🔪 Выбор принят: вы пошли к {player_display_name(target)}."
-                )
-            else:
-                await callback.message.answer("🔪 Маньяк выбрал цель.")
             await announce_night_role_once(actor.role)
-            keyboard = build_action_keyboard(room, callback.from_user.id)
-            if keyboard is not None:
-                await callback.message.edit_reply_markup(reply_markup=keyboard)
+            if target is not None:
+                status_text = f"🔪 Выбор принят: вы пошли к {player_display_name(target)}."
+            else:
+                status_text = "🔪 Маньяк выбрал цель."
+            await refresh_private_action_message(callback, room, callback.from_user.id, status_text)
             await maybe_finish_phase_early(callback.bot, room)
             persist_room(room)
         return
@@ -2113,16 +2182,12 @@ async def on_action_callback(callback: CallbackQuery) -> None:
         await callback.answer(info, show_alert=not ok)
         if ok:
             target = room.get_player(target_id)
-            if target is not None:
-                await callback.message.answer(
-                    f"💃 Ход принят: вы пошли к {player_display_name(target)}."
-                )
-            else:
-                await callback.message.answer("💃 Любовница сделала ход.")
             await announce_night_role_once(actor.role)
-            keyboard = build_action_keyboard(room, callback.from_user.id)
-            if keyboard is not None:
-                await callback.message.edit_reply_markup(reply_markup=keyboard)
+            if target is not None:
+                status_text = f"💃 Ход принят: вы пошли к {player_display_name(target)}."
+            else:
+                status_text = "💃 Любовница сделала ход."
+            await refresh_private_action_message(callback, room, callback.from_user.id, status_text)
             await maybe_finish_phase_early(callback.bot, room)
             persist_room(room)
         return
@@ -2132,16 +2197,12 @@ async def on_action_callback(callback: CallbackQuery) -> None:
         await callback.answer(info, show_alert=not ok)
         if ok:
             target = room.get_player(target_id)
-            if target is not None:
-                await callback.message.answer(
-                    f"🧥 Наблюдение начато: вы пошли к {player_display_name(target)}."
-                )
-            else:
-                await callback.message.answer("🧥 Бомж отправился наблюдать.")
             await announce_night_role_once(actor.role)
-            keyboard = build_action_keyboard(room, callback.from_user.id)
-            if keyboard is not None:
-                await callback.message.edit_reply_markup(reply_markup=keyboard)
+            if target is not None:
+                status_text = f"🧥 Наблюдение начато: вы пошли к {player_display_name(target)}."
+            else:
+                status_text = "🧥 Бомж отправился наблюдать."
+            await refresh_private_action_message(callback, room, callback.from_user.id, status_text)
             await maybe_finish_phase_early(callback.bot, room)
             persist_room(room)
         return
@@ -2166,36 +2227,62 @@ async def on_private_menu_callback(callback: CallbackQuery) -> None:
         return
 
     action = callback.data.split(":", maxsplit=1)[1]
+
+    async def show_menu_screen(text: str, keyboard: InlineKeyboardMarkup) -> None:
+        try:
+            await callback.message.edit_text(text, reply_markup=keyboard)
+        except Exception:
+            await callback.message.answer(text, reply_markup=keyboard)
+
+    if action == "main":
+        nickname = user_nickname(callback.from_user)
+        await show_menu_screen(
+            (
+                f"<b>С возвращением, {nickname}!</b>\n\n"
+                "Выбери нужный раздел кнопками ниже."
+            ),
+            private_main_menu_keyboard(),
+        )
+        await callback.answer()
+        return
+
     if action == "roles":
-        await callback.message.answer(all_roles_info_text())
+        await show_menu_screen(all_roles_info_text(), private_back_to_menu_keyboard())
         await callback.answer()
         return
     if action == "stats":
         stats = repo.get_player_stats(callback.from_user.id)
         if stats is None:
-            await callback.message.answer("Пока нет сохраненной статистики. Сыграй хотя бы одну завершенную партию.")
+            await show_menu_screen(
+                "Пока нет сохраненной статистики. Сыграй хотя бы одну завершенную партию.",
+                private_back_to_menu_keyboard(),
+            )
         else:
-            await callback.message.answer(format_player_stats_text(stats))
+            await show_menu_screen(format_player_stats_text(stats), private_back_to_menu_keyboard())
         await callback.answer()
         return
     if action == "profile":
         room = get_player_profile_room(callback.from_user.id)
         if room is None:
-            await callback.message.answer("Нет активной партии, где ты участвуешь. Профиль роли появится во время игры.")
+            await show_menu_screen(
+                "Нет активной партии, где ты участвуешь. Профиль роли появится во время игры.",
+                private_back_to_menu_keyboard(),
+            )
             await callback.answer()
             return
         player = room.get_player(callback.from_user.id)
         if player is None:
-            await callback.message.answer("Профиль не найден.")
+            await show_menu_screen("Профиль не найден.", private_back_to_menu_keyboard())
             await callback.answer()
             return
         role_mark = f"{ROLE_EMOJI.get(player.role, '')} {player.role}".strip()
         alive_text = "в игре" if player.alive else "выбыл"
-        await callback.message.answer(
+        await show_menu_screen(
             "<b>Твой профиль</b>\n"
             f"Чат: {room.chat_title or room.chat_id}\n"
             f"Статус: {alive_text}\n"
-            f"Роль: {role_mark}"
+            f"Роль: {role_mark}",
+            private_back_to_menu_keyboard(),
         )
         await callback.answer()
         return
