@@ -242,11 +242,14 @@ async def launch_game_from_registration(bot: Bot, room, chat_id: int, chat_title
     clear_action_menu_messages(chat_id)
     persist_room(room)
 
-    await bot.send_message(
-        chat_id,
-        "Игра начинается!\n\n"
-        "В течение нескольких секунд бот пришлет вам в ЛС роль и меню действий.",
-    )
+    try:
+        await bot.send_message(
+            chat_id,
+            "Игра начинается!\n\n"
+            "В течение нескольких секунд бот пришлет вам в ЛС роль и меню действий.",
+        )
+    except Exception:
+        pass
 
     for player in room.players.values():
         try:
@@ -255,22 +258,48 @@ async def launch_game_from_registration(bot: Bot, room, chat_id: int, chat_title
                 card_text += mafia_allies_text(room)
             await bot.send_message(player.user_id, card_text)
         except Exception:
-            await bot.send_message(
-                chat_id,
-                f"Не смог отправить роль {player.full_name}."
-                " Пусть напишет боту /start в личке.",
-            )
+            try:
+                await bot.send_message(
+                    chat_id,
+                    f"Не смог отправить роль {player.full_name}."
+                    " Пусть напишет боту /start в личке.",
+                )
+            except Exception:
+                pass
 
-    await send_phase_media(bot, chat_id, room.night_intro_text(), NIGHT_IMAGE_PATH)
-    keyboard = await night_action_keyboard(bot)
-    await bot.send_message(
-        chat_id,
-        f"Живых игроков: {len(room.alive_players())}. До рассвета {NIGHT_PHASE_SECONDS} сек.",
-        reply_markup=keyboard,
-    )
-    await bot.send_message(chat_id, "Роли делают свой выбор в личке бота. Меню разослано автоматически.")
-    await push_phase_action_menus(bot, room)
+    try:
+        await send_phase_media(bot, chat_id, room.night_intro_text(), NIGHT_IMAGE_PATH)
+    except Exception:
+        try:
+            await bot.send_message(chat_id, room.night_intro_text())
+        except Exception:
+            pass
+
+    keyboard: InlineKeyboardMarkup | None = None
+    try:
+        keyboard = await night_action_keyboard(bot)
+    except Exception:
+        keyboard = None
+
+    try:
+        await bot.send_message(
+            chat_id,
+            f"Живых игроков: {len(room.alive_players())}. До рассвета {NIGHT_PHASE_SECONDS} сек.",
+            reply_markup=keyboard,
+        )
+    except Exception:
+        pass
+
+    try:
+        await bot.send_message(chat_id, "Роли делают свой выбор в личке бота. Меню разослано автоматически.")
+    except Exception:
+        pass
+
     await start_phase_timer(room, bot)
+    try:
+        await push_phase_action_menus(bot, room)
+    except Exception:
+        pass
 
 
 async def process_registration_timeout(bot: Bot, chat_id: int) -> None:
@@ -1178,10 +1207,6 @@ async def cmd_start(message: Message, command: CommandObject) -> None:
             f"Ты зарегистрирован в чате: {room.chat_title or room.chat_id}.\n"
             f"Твой ник в лобби: {nickname}."
         )
-        await message.bot.send_message(
-            room.chat_id,
-            f"{nickname} зарегистрировался в лобби.",
-        )
         await refresh_registration_post(message, room)
         return
 
@@ -1961,7 +1986,7 @@ async def on_private_text(message: Message) -> None:
             continue
 
 
-@router.message(F.chat.type.in_({"group", "supergroup"}))
+@router.message(F.chat.type.in_({"group", "supergroup"}), ~F.text.startswith("/"))
 async def enforce_group_game_rules(message: Message) -> None:
     room = storage.get_room(message.chat.id)
     if room is None or not room.started or room.phase == PHASE_FINISHED:
