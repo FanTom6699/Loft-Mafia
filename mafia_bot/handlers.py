@@ -942,9 +942,11 @@ async def push_phase_action_menus(bot: Bot, room) -> None:
 
 
 async def push_trial_vote_menus(bot: Bot, room, candidate_name: str) -> None:
+    print(f"[TRIAL] push_trial_vote_menus: candidate={candidate_name}, players={[p.user_id for p in room.alive_players()]}")
     yes_count, no_count = room.trial_vote_counts()
     for player in room.alive_players():
         try:
+            print(f"[TRIAL] Sending trial vote menu to user_id={player.user_id}, name={player.full_name}")
             await bot.send_message(
                 player.user_id,
                 (
@@ -953,7 +955,8 @@ async def push_trial_vote_menus(bot: Bot, room, candidate_name: str) -> None:
                 ),
                 reply_markup=trial_vote_keyboard(room.chat_id, yes_count, no_count),
             )
-        except Exception:
+        except Exception as e:
+            print(f"[ERROR] push_trial_vote_menus: user_id={player.user_id}, error={e!r}")
             await bot.send_message(
                 room.chat_id,
                 f"Не смог отправить голосование игроку {player.full_name}."
