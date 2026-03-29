@@ -2,6 +2,7 @@ import asyncio
 import os
 import time
 from datetime import datetime
+from html import escape
 
 from aiogram import F, Router
 from aiogram.filters import Command, CommandObject, CommandStart
@@ -17,9 +18,20 @@ from mafia_bot.game import (
     PHASE_DAY,
     PHASE_FINISHED,
     PHASE_NIGHT,
+    ROLE_ACTION_RULES,
+    ROLE_BUM,
+    ROLE_CITIZEN,
+    ROLE_COMMISSAR,
+    ROLE_DESCRIPTION,
     ROLE_DON,
     ROLE_EMOJI,
+    ROLE_DOCTOR,
+    ROLE_KAMIKAZE,
+    ROLE_LUCKY,
     ROLE_MAFIA,
+    ROLE_MANIAC,
+    ROLE_MISTRESS,
+    ROLE_SUICIDE,
     GameStorage,
     all_roles_info_text,
     role_card_text,
@@ -633,7 +645,7 @@ async def private_bot_link(bot: Bot) -> str:
 async def night_action_keyboard(bot: Bot) -> InlineKeyboardMarkup:
     link = await private_bot_link(bot)
     return InlineKeyboardMarkup(
-        inline_keyboard=[[InlineKeyboardButton(text="Перейти в ЛС бота", url=link)]],
+        inline_keyboard=[[InlineKeyboardButton(text="Голосовать", url=link)]],
     )
 
 
@@ -718,7 +730,6 @@ def registration_panel() -> InlineKeyboardMarkup:
 def private_main_menu_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
-            [InlineKeyboardButton(text="Профиль", callback_data="pmenu:profile")],
             [InlineKeyboardButton(text="Список ролей", callback_data="pmenu:roles")],
             [InlineKeyboardButton(text="Статистика", callback_data="pmenu:stats")],
         ]
@@ -728,6 +739,47 @@ def private_main_menu_keyboard() -> InlineKeyboardMarkup:
 def private_back_to_menu_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[[InlineKeyboardButton(text="⬅️ В меню", callback_data="pmenu:main")]]
+    )
+
+
+PRIVATE_ROLE_ORDER = [
+    ROLE_DON,
+    ROLE_MAFIA,
+    ROLE_MANIAC,
+    ROLE_COMMISSAR,
+    ROLE_DOCTOR,
+    ROLE_MISTRESS,
+    ROLE_BUM,
+    ROLE_SUICIDE,
+    ROLE_LUCKY,
+    ROLE_KAMIKAZE,
+    ROLE_CITIZEN,
+]
+
+
+def private_roles_keyboard() -> InlineKeyboardMarkup:
+    rows: list[list[InlineKeyboardButton]] = []
+    for idx, role in enumerate(PRIVATE_ROLE_ORDER):
+        emoji = ROLE_EMOJI.get(role, "")
+        rows.append([InlineKeyboardButton(text=f"{emoji} {role}".strip(), callback_data=f"pmenu:role:{idx}")])
+    rows.append([InlineKeyboardButton(text="⬅️ В меню", callback_data="pmenu:main")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def private_back_to_roles_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[[InlineKeyboardButton(text="⬅️ Назад", callback_data="pmenu:roles")]]
+    )
+
+
+def private_role_details_text(role: str) -> str:
+    emoji = ROLE_EMOJI.get(role, "")
+    description = ROLE_DESCRIPTION.get(role, "Описание пока не добавлено.")
+    action_rule = ROLE_ACTION_RULES.get(role, "Механика роли пока не добавлена.")
+    return (
+        f"{emoji} <b>{role}</b>\n\n"
+        f"{description}\n\n"
+        f"<b>Как ходит роль</b>\n{action_rule}"
     )
 
 
@@ -800,19 +852,31 @@ def build_action_keyboard(room, actor_user_id: int) -> InlineKeyboardMarkup | No
         return None
 
     rows: list[list[InlineKeyboardButton]] = []
-    alive_targets = [p for p in room.alive_players() if p.user_id != actor_user_id]
+    all_players_order = list(room.players.values())
+    seat_positions = {p.user_id: i for i, p in enumerate(all_players_order, start=1)}
+    alive_players = room.alive_players()
+    alive_targets = [p for p in alive_players if p.user_id != actor_user_id]
     selected_target_id = selected_target_for_actor(room, actor_user_id)
 
     def mark(name: str, user_id: int) -> str:
         return f"✅ {name}" if selected_target_id == user_id else name
 
+    def target_label(target, teammate_mark: str = "") -> str:
+        position = seat_positions.get(target.user_id)
+        base_name = player_display_name(target)
+        if position is None:
+            return f"{teammate_mark} {base_name}".strip()
+        return f"{position}.{teammate_mark} {base_name}".strip()
+
     if room.phase == "night":
         if actor.role in {"Дон", "Мафия"}:
+            mafia_teammate_ids = {p.user_id for p in alive_players if p.role in {ROLE_DON, ROLE_MAFIA}}
             for target in alive_targets:
+                teammate_mark = " 🤵🏻" if target.user_id in mafia_teammate_ids else ""
                 rows.append(
                     [
                         InlineKeyboardButton(
-                            text=mark(player_display_name(target), target.user_id),
+                            text=mark(target_label(target, teammate_mark), target.user_id),
                             callback_data=f"act:kill:{room.chat_id}:{target.user_id}",
                         )
                     ]
@@ -822,7 +886,7 @@ def build_action_keyboard(room, actor_user_id: int) -> InlineKeyboardMarkup | No
                 rows.append(
                     [
                         InlineKeyboardButton(
-                            text=mark(player_display_name(target), target.user_id),
+                            text=mark(target_label(target), target.user_id),
                             callback_data=f"act:heal:{room.chat_id}:{target.user_id}",
                         )
                     ]
@@ -832,7 +896,7 @@ def build_action_keyboard(room, actor_user_id: int) -> InlineKeyboardMarkup | No
                 rows.append(
                     [
                         InlineKeyboardButton(
-                            text=mark(player_display_name(target), target.user_id),
+                            text=mark(target_label(target), target.user_id),
                             callback_data=f"act:check:{room.chat_id}:{target.user_id}",
                         )
                     ]
@@ -842,7 +906,7 @@ def build_action_keyboard(room, actor_user_id: int) -> InlineKeyboardMarkup | No
                 rows.append(
                     [
                         InlineKeyboardButton(
-                            text=mark(player_display_name(target), target.user_id),
+                            text=mark(target_label(target), target.user_id),
                             callback_data=f"act:maniac:{room.chat_id}:{target.user_id}",
                         )
                     ]
@@ -852,7 +916,7 @@ def build_action_keyboard(room, actor_user_id: int) -> InlineKeyboardMarkup | No
                 rows.append(
                     [
                         InlineKeyboardButton(
-                            text=mark(player_display_name(target), target.user_id),
+                            text=mark(target_label(target), target.user_id),
                             callback_data=f"act:mistress:{room.chat_id}:{target.user_id}",
                         )
                     ]
@@ -862,7 +926,7 @@ def build_action_keyboard(room, actor_user_id: int) -> InlineKeyboardMarkup | No
                 rows.append(
                     [
                         InlineKeyboardButton(
-                            text=mark(player_display_name(target), target.user_id),
+                            text=mark(target_label(target), target.user_id),
                             callback_data=f"act:bum:{room.chat_id}:{target.user_id}",
                         )
                     ]
@@ -873,7 +937,7 @@ def build_action_keyboard(room, actor_user_id: int) -> InlineKeyboardMarkup | No
             rows.append(
                 [
                     InlineKeyboardButton(
-                        text=mark(player_display_name(target), target.user_id),
+                        text=mark(target_label(target), target.user_id),
                         callback_data=f"act:vote:{room.chat_id}:{target.user_id}",
                     )
                 ]
@@ -922,9 +986,15 @@ def build_action_prompt_text(room, actor_user_id: int) -> str:
 
 def night_status_text(room) -> str:
     alive = room.alive_players()
+    seat_positions = {p.user_id: i for i, p in enumerate(room.players.values(), start=1)}
     lines = ["Живые игроки:"]
-    for i, player in enumerate(alive, start=1):
-        lines.append(f"{i}. {player.full_name}")
+    for player in alive:
+        seat_no = seat_positions.get(player.user_id)
+        safe_name = escape(player.full_name)
+        if seat_no is None:
+            lines.append(f"<a href=\"tg://user?id={player.user_id}\">{safe_name}</a>")
+        else:
+            lines.append(f"{seat_no}. <a href=\"tg://user?id={player.user_id}\">{safe_name}</a>")
     lines.append(f"\nСпать осталось {NIGHT_PHASE_SECONDS} сек.")
     return "\n".join(lines)
 
@@ -1149,13 +1219,15 @@ async def process_day_end(bot: Bot, chat_id: int, timer_reason: str | None = Non
             print(f"[PHASE] process_day_end: switching to nomination stage for chat_id={chat_id}")
             room.start_day_nomination()
             persist_room(room)
+            private_keyboard = await night_action_keyboard(bot)
             await bot.send_message(
                 chat_id,
                 (
-                    "Этап выбора цели на повешение.\n"
-                    "Игроки в личке бота выбирают одного кандидата.\n"
-                    f"Время на выбор: {DAY_NOMINATION_SECONDS} сек."
+                    "Пришло время определить и наказать виновного.\n"
+                    "Выберите кандидата на выгон.\n"
+                    f"Голосование продлится: {DAY_NOMINATION_SECONDS} сек."
                 ),
+                reply_markup=private_keyboard,
             )
             await push_phase_action_menus(bot, room)
             await start_phase_timer(room, bot)
@@ -1251,8 +1323,15 @@ async def process_day_end(bot: Bot, chat_id: int, timer_reason: str | None = Non
             room.start_day_trial(candidate.user_id)
             print(f"[PHASE] process_day_end: trial started for chat_id={chat_id}, candidate_id={candidate.user_id}, candidate_name={candidate.full_name}")
             persist_room(room)
+            await bot.send_message(
+                chat_id,
+                (
+                    "Пришло время определить и наказать виновного.\n"
+                    f"Выгоняем {candidate.full_name}?\n"
+                    f"Голосование продлится: {DAY_TRIAL_SECONDS} сек."
+                ),
+            )
             await push_trial_vote_menus(bot, room, candidate.full_name)
-            await bot.send_message(chat_id, f"Время голосования за/против: {DAY_TRIAL_SECONDS} сек.")
             await start_phase_timer(room, bot)
             print(f"[PHASE] process_day_end: trial menus sent and timer started for chat_id={chat_id}")
             return
@@ -1284,11 +1363,11 @@ async def process_day_end(bot: Bot, chat_id: int, timer_reason: str | None = Non
                 except Exception:
                     pass
                 if first.role == "Самоубийца":
-                    await bot.send_message(chat_id, "<b>Самоубийца</b> выполнил личную цель победы.")
+                    await bot.send_message(chat_id, "💀 <b>Самоубийца</b> выполнил личную цель победы.")
                 if first.role == "Камикадзе" and len(eliminated) > 1:
                     second = eliminated[1]
                     second_role = role_mark_text(second.role)
-                    await bot.send_message(chat_id, f"Камикадзе забрал с собой {second.full_name} ({second_role}).")
+                    await bot.send_message(chat_id, f"💣 Камикадзе забрал с собой {second.full_name} ({second_role}).")
             else:
                 await bot.send_message(chat_id, "Игрок остается в игре.")
 
@@ -1518,7 +1597,7 @@ async def cmd_start(message: Message, command: CommandObject) -> None:
                 "<b>В этом чате ты можешь:</b>\n"
                 "• Получать роль и задания по фазам\n"
                 "• Делать ходы кнопками\n"
-                "• Смотреть профиль, роли и статистику\n\n"
+                "• Смотреть роли и статистику\n\n"
                 "Найди лобби в группе и присоединяйся."
             )
         else:
@@ -1547,7 +1626,7 @@ async def cmd_start(message: Message, command: CommandObject) -> None:
 @router.message(Command("roles"))
 async def cmd_roles(message: Message) -> None:
     if message.chat.type == "private":
-        await message.answer(all_roles_info_text(), reply_markup=private_back_to_menu_keyboard())
+        await message.answer("Выберите роль:", reply_markup=private_roles_keyboard())
         return
     await message.answer(all_roles_info_text())
 
@@ -1572,32 +1651,7 @@ async def cmd_stats(message: Message) -> None:
 
 @router.message(Command("profile"))
 async def cmd_profile(message: Message) -> None:
-    if message.chat.type != "private":
-        await message.answer("Профиль доступен в ЛС бота.")
-        return
-
-    room = get_player_profile_room(message.from_user.id)
-    if room is None:
-        await message.answer(
-            "Нет активной партии, где ты участвуешь. Профиль роли появится во время игры.",
-            reply_markup=private_back_to_menu_keyboard(),
-        )
-        return
-
-    player = room.get_player(message.from_user.id)
-    if player is None:
-        await message.answer("Профиль не найден.", reply_markup=private_back_to_menu_keyboard())
-        return
-
-    role_mark = role_mark_text(player.role)
-    alive_text = "в игре" if player.alive else "выбыл"
-    await message.answer(
-        "<b>Твой профиль</b>\n"
-        f"Чат: {room.chat_title or room.chat_id}\n"
-        f"Статус: {alive_text}\n"
-        f"Роль: {role_mark}",
-        reply_markup=private_back_to_menu_keyboard(),
-    )
+    await message.answer("Профиль отключен. Используй меню ролей и статистики.")
 
 
 @router.message(Command("action"))
@@ -2251,7 +2305,21 @@ async def on_private_menu_callback(callback: CallbackQuery) -> None:
         return
 
     if action == "roles":
-        await show_menu_screen(all_roles_info_text(), private_back_to_menu_keyboard())
+        await show_menu_screen("Выберите роль:", private_roles_keyboard())
+        await callback.answer()
+        return
+    if action.startswith("role:"):
+        raw_idx = action.split(":", maxsplit=1)[1]
+        try:
+            idx = int(raw_idx)
+        except ValueError:
+            await callback.answer("Некорректная роль.", show_alert=True)
+            return
+        if idx < 0 or idx >= len(PRIVATE_ROLE_ORDER):
+            await callback.answer("Роль не найдена.", show_alert=True)
+            return
+        role = PRIVATE_ROLE_ORDER[idx]
+        await show_menu_screen(private_role_details_text(role), private_back_to_roles_keyboard())
         await callback.answer()
         return
     if action == "stats":
@@ -2266,28 +2334,7 @@ async def on_private_menu_callback(callback: CallbackQuery) -> None:
         await callback.answer()
         return
     if action == "profile":
-        room = get_player_profile_room(callback.from_user.id)
-        if room is None:
-            await show_menu_screen(
-                "Нет активной партии, где ты участвуешь. Профиль роли появится во время игры.",
-                private_back_to_menu_keyboard(),
-            )
-            await callback.answer()
-            return
-        player = room.get_player(callback.from_user.id)
-        if player is None:
-            await show_menu_screen("Профиль не найден.", private_back_to_menu_keyboard())
-            await callback.answer()
-            return
-        role_mark = role_mark_text(player.role)
-        alive_text = "в игре" if player.alive else "выбыл"
-        await show_menu_screen(
-            "<b>Твой профиль</b>\n"
-            f"Чат: {room.chat_title or room.chat_id}\n"
-            f"Статус: {alive_text}\n"
-            f"Роль: {role_mark}",
-            private_back_to_menu_keyboard(),
-        )
+        await show_menu_screen("Профиль отключен. Используй меню ролей и статистики.", private_back_to_menu_keyboard())
         await callback.answer()
         return
     await callback.answer("Неизвестный пункт меню.", show_alert=True)

@@ -1,6 +1,7 @@
 import random
 from dataclasses import dataclass, field
 from datetime import datetime
+from html import escape
 
 
 MIN_PLAYERS = 4
@@ -175,7 +176,7 @@ class GameRoom:
         # Возвращает явный текст роли для проверки комиссаром
         role = checked_player.role
         emoji = ROLE_EMOJI.get(role, "")
-        return f"{checked_player.full_name}: {emoji} <b>{role}</b>"
+        return f"🕵️ Результат проверки: {checked_player.full_name} - {emoji} <b>{role}</b>"
     chat_title: str = ""
     players: dict[int, Player] = field(default_factory=dict)
     started: bool = False
@@ -740,68 +741,47 @@ class GameRoom:
         self.day_silenced_user_id = None
 
         mistress = next((p for p in self.alive_players() if p.role == ROLE_MISTRESS), None)
-        blocked_user_id_initial: int | None = None
+        mistress_target_id: int | None = None
         if mistress is not None and self.mistress_target_id is not None:
-            blocked_user_id_initial = self.mistress_target_id
+            mistress_target_id = self.mistress_target_id
 
         doctor = next((p for p in self.alive_players() if p.role == ROLE_DOCTOR), None)
         doctor_target_id: int | None = None
-        if (
-            doctor is not None
-            and self.doctor_target_id is not None
-            and (blocked_user_id_initial is None or doctor.user_id != blocked_user_id_initial)
-        ):
+        if doctor is not None and self.doctor_target_id is not None:
             target = self.get_player(self.doctor_target_id)
             if target is not None and target.alive:
                 doctor_target_id = target.user_id
 
-        # Mistress block can be removed if doctor treated the same target this night.
-        blocked_user_id = blocked_user_id_initial
-        if blocked_user_id is not None and doctor_target_id == blocked_user_id:
-            blocked_user_id = None
-
-        if blocked_user_id is not None:
-            blocked_player = self.get_player(blocked_user_id)
-            if blocked_player is not None and blocked_player.alive:
-                self.day_silenced_user_id = blocked_user_id
-
-        if blocked_user_id_initial is not None:
-            blocked_target = self.get_player(blocked_user_id_initial)
+        if mistress_target_id is not None:
+            blocked_target = self.get_player(mistress_target_id)
             if blocked_target is not None and blocked_target.alive:
-                self.add_night_report_line(blocked_target.user_id, "💃 Ночью к тебе приходила Любовница.")
+                self.add_night_report_line(blocked_target.user_id, "Ночью к тебе приходила 💃 Любовница.")
 
         if doctor_target_id is not None:
             healed_target = self.get_player(doctor_target_id)
             if healed_target is not None and healed_target.alive:
-                self.add_night_report_line(healed_target.user_id, "👨🏼‍⚕️ Ночью к тебе приходил Доктор.")
+                self.add_night_report_line(healed_target.user_id, "Ночью к тебе приходил 👨🏼‍⚕️ Доктор.")
 
-        mafia_votes = self._active_mafia_votes(blocked_user_id=blocked_user_id)
+        mafia_votes = self._active_mafia_votes()
         mafia_target_id = self._choose_mafia_target(mafia_votes)
 
         maniac = next((p for p in self.alive_players() if p.role == ROLE_MANIAC), None)
         maniac_target_id: int | None = None
-        if (
-            maniac is not None
-            and self.maniac_target_id is not None
-            and (blocked_user_id is None or maniac.user_id != blocked_user_id)
-        ):
+        if maniac is not None and self.maniac_target_id is not None:
             target = self.get_player(self.maniac_target_id)
             if target is not None and target.alive and target.user_id != maniac.user_id:
                 maniac_target_id = target.user_id
 
         commissar = next((p for p in self.alive_players() if p.role == ROLE_COMMISSAR), None)
         if commissar is not None and self.commissar_target_id is not None:
-            if blocked_user_id is not None and commissar.user_id == blocked_user_id:
-                self.add_night_report_line(commissar.user_id, "Тебя отвлекли этой ночью. Проверка сорвалась.")
-            else:
-                checked = self.get_player(self.commissar_target_id)
-                if checked is not None and checked.alive:
-                    self.add_night_report_line(checked.user_id, "🕵️ Ночью тебя проверял Комиссар.")
-                    # Явный вывод роли для комиссара
-                    self.add_night_report_line(
-                        commissar.user_id,
-                        f"Результат проверки: {self.commissar_check_result_text(checked)}",
-                    )
+            checked = self.get_player(self.commissar_target_id)
+            if checked is not None and checked.alive:
+                self.add_night_report_line(checked.user_id, "Ночью тебя проверял 🕵️ Комиссар Каттани.")
+                # Явный вывод роли для комиссара
+                self.add_night_report_line(
+                    commissar.user_id,
+                    self.commissar_check_result_text(checked),
+                )
 
         attacks: dict[int, list[str]] = {}
         if mafia_target_id is not None:
@@ -833,25 +813,30 @@ class GameRoom:
             if don_transfer_result is not None:
                 don_transfer_note, don_successor_id = don_transfer_result
 
+        # Mistress no longer blocks night actions. She only sets day silence if she survived the night.
+        if mistress is not None and mistress.alive and mistress_target_id is not None:
+            silenced_player = self.get_player(mistress_target_id)
+            if silenced_player is not None and silenced_player.alive:
+                self.day_silenced_user_id = silenced_player.user_id
+
         bum = next((p for p in self.alive_players() if p.role == ROLE_BUM), None)
         if bum is not None and self.bum_target_id is not None:
-            if blocked_user_id is None or bum.user_id != blocked_user_id:
-                observed = self.get_player(self.bum_target_id)
-                if observed is not None:
-                    if observed.alive:
-                        self.add_night_report_line(observed.user_id, "🧥 Ночью рядом с тобой крутился Бомж.")
-                    notes: list[str] = []
-                    if observed.user_id == mafia_target_id:
-                        notes.append("У дома цели крутились подозрительные люди.")
-                    if observed.user_id == maniac_target_id:
-                        notes.append("Рядом заметили одинокую фигуру с ножом.")
-                    if observed.user_id == doctor_target_id:
-                        notes.append("К цели заходил ночной медик.")
-                    if not notes:
-                        notes.append("Ночь прошла тихо, явных событий у цели не было.")
-                    self.add_night_report_line(bum.user_id, f"Наблюдение за {observed.full_name}:")
-                    for note in notes:
-                        self.add_night_report_line(bum.user_id, note)
+            observed = self.get_player(self.bum_target_id)
+            if observed is not None:
+                if observed.alive:
+                    self.add_night_report_line(observed.user_id, "Ночью рядом с тобой крутился 🧥 Бомж.")
+                notes: list[str] = []
+                if observed.user_id == mafia_target_id:
+                    notes.append("У дома цели крутились подозрительные люди.")
+                if observed.user_id == maniac_target_id:
+                    notes.append("Рядом заметили одинокую фигуру с ножом.")
+                if observed.user_id == doctor_target_id:
+                    notes.append("К цели заходил ночной медик.")
+                if not notes:
+                    notes.append("Ночь прошла тихо, явных событий у цели не было.")
+                self.add_night_report_line(bum.user_id, f"Наблюдение за {observed.full_name}:")
+                for note in notes:
+                    self.add_night_report_line(bum.user_id, note)
 
         self.night_votes.clear()
         self.mafia_vote_locked = False
@@ -1012,7 +997,7 @@ class GameRoom:
 
         parts = []
         for role, count in sorted(counts.items()):
-            parts.append(f"{ROLE_EMOJI.get(role, '')} <b>{role}</b> x{count}".strip())
+            parts.append(f"{ROLE_EMOJI.get(role, '')} <b>{role}</b> - <b>{count}</b>".strip())
         return "Кто-то из них:\n" + "\n".join(parts)
 
     def alive_players_text(self) -> str:
@@ -1020,20 +1005,30 @@ class GameRoom:
         if not alive:
             return "Живых игроков нет."
 
+        seat_positions = {p.user_id: i for i, p in enumerate(self.players.values(), start=1)}
         lines = [f"Живые игроки: {len(alive)}"]
-        for i, player in enumerate(alive, start=1):
-            lines.append(f"{i}. {player.full_name}")
+        for player in alive:
+            seat_no = seat_positions.get(player.user_id)
+            safe_name = escape(player.full_name)
+            if seat_no is None:
+                lines.append(f"<a href=\"tg://user?id={player.user_id}\">{safe_name}</a>")
+            else:
+                lines.append(f"{seat_no}. <a href=\"tg://user?id={player.user_id}\">{safe_name}</a>")
         return "\n".join(lines)
 
     def alive_role_hints_text(self) -> str:
-        roles = {player.role for player in self.alive_players()}
-        if not roles:
+        counts: dict[str, int] = {}
+        for player in self.alive_players():
+            counts[player.role] = counts.get(player.role, 0) + 1
+        if not counts:
             return ""
 
-        parts = [f"{ROLE_EMOJI.get(role, '')} <b>{role}</b>".strip() for role in sorted(roles)]
+        parts = []
+        for role, count in sorted(counts.items()):
+            parts.append(f"{ROLE_EMOJI.get(role, '')} <b>{role}</b> - <b>{count}</b>".strip())
         return (
             "Кто-то из них:\n"
-            + ", ".join(parts)
+            + "\n".join(parts)
             + f"\nВсего: {len(self.alive_players())} чел."
         )
 

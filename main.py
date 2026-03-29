@@ -19,7 +19,6 @@ async def setup_bot_commands(bot: Bot) -> None:
     ]
     private_commands = [
         BotCommand(command="start", description="Главное меню"),
-        BotCommand(command="profile", description="Твой профиль"),
         BotCommand(command="roles", description="Список ролей"),
         BotCommand(command="stats", description="Твоя статистика"),
     ]
