@@ -20,6 +20,7 @@ from mafia_bot.game import (
     PHASE_NIGHT,
     ROLE_ACTION_RULES,
     ROLE_BUM,
+    ROLE_ADVOCATE,
     ROLE_CITIZEN,
     ROLE_COMMISSAR,
     ROLE_DESCRIPTION,
@@ -645,7 +646,7 @@ async def private_bot_link(bot: Bot) -> str:
 async def night_action_keyboard(bot: Bot) -> InlineKeyboardMarkup:
     link = await private_bot_link(bot)
     return InlineKeyboardMarkup(
-        inline_keyboard=[[InlineKeyboardButton(text="Голосовать", url=link)]],
+        inline_keyboard=[[InlineKeyboardButton(text="Посмотреть роль", url=link)]],
     )
 
 
@@ -1155,7 +1156,6 @@ async def process_night_end(bot: Bot, chat_id: int, timer_reason: str | None = N
 
         if room.last_doctor_saved_target_id is not None:
             await bot.send_message(chat_id, "👨🏼‍⚕️ Доктор спас кого-то от смерти.")
-
         if eliminated:
             for dead in eliminated:
                 role_text = role_mark_text(dead.role)
@@ -2101,8 +2101,21 @@ async def on_action_callback(callback: CallbackQuery) -> None:
             return
         if not room.mark_night_role_announced(role_name):
             return
-        role_mark = role_mark_text(role_name)
-        await callback.bot.send_message(room.chat_id, f"{role_mark} сделал ночной ход.")
+        role_announcement = {
+            ROLE_COMMISSAR: "🕵️ Комиссар Каттани ушёл искать злодеев...",
+            ROLE_BUM: "🧙🏼‍♂️ Бомж пошёл к кому-то за бутылкой...",
+            ROLE_MANIAC: "🔪 Маньяк спрятался глубоко в кустах...",
+            ROLE_ADVOCATE: "👨🏼‍💼 Адвокат ищет мафию для защиты...",
+            ROLE_MISTRESS: "💃🏼 Любовница уже ждёт кого-то в гости...",
+            ROLE_DOCTOR: "👨🏼‍⚕️ Доктор вышел на ночное дежурство...",
+            ROLE_DON: "🤵🏻 Мафия выбрала жертву...",
+            ROLE_MAFIA: "🤵🏻 Мафия выбрала жертву...",
+        }
+        announcement_text = role_announcement.get(role_name)
+        if announcement_text is None:
+            role_mark = role_mark_text(role_name)
+            announcement_text = f"{role_mark} сделал ночной ход."
+        await callback.bot.send_message(room.chat_id, announcement_text)
 
     if action == "kill":
         ok, info = room.set_night_vote(callback.from_user.id, target_id)

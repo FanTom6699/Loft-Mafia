@@ -21,6 +21,7 @@ ROLE_COMMISSAR = "Комиссар Каттани"
 ROLE_DOCTOR = "Доктор"
 ROLE_MISTRESS = "Любовница"
 ROLE_BUM = "Бомж"
+ROLE_ADVOCATE = "Адвокат"
 ROLE_SUICIDE = "Самоубийца"
 ROLE_LUCKY = "Счастливчик"
 ROLE_KAMIKAZE = "Камикадзе"
@@ -29,55 +30,70 @@ ROLE_CITIZEN = "Мирный житель"
 MAFIA_ROLES = {ROLE_DON, ROLE_MAFIA}
 
 ROLE_EMOJI = {
-    ROLE_DON: "👑",
-    ROLE_MAFIA: "🕶️",
+    ROLE_DON: "🤵🏻",
+    ROLE_MAFIA: "🤵🏼",
     ROLE_MANIAC: "🔪",
-    ROLE_COMMISSAR: "🕵️",
-    ROLE_DOCTOR: "💉",
-    ROLE_MISTRESS: "💄",
-    ROLE_BUM: "🧥",
+    ROLE_COMMISSAR: "🕵️‍",
+    ROLE_DOCTOR: "👨🏼‍⚕️",
+    ROLE_MISTRESS: "💃🏼",
+    ROLE_BUM: "🧙🏼‍♂️",
+    ROLE_ADVOCATE: "👨🏼‍💼",
     ROLE_SUICIDE: "☠️",
-    ROLE_LUCKY: "🍀",
-    ROLE_KAMIKAZE: "🧨",
-    ROLE_CITIZEN: "🕊️",
+    ROLE_LUCKY: "🤞",
+    ROLE_KAMIKAZE: "💣",
+    ROLE_CITIZEN: "👨🏼",
 }
 
 ROLE_DESCRIPTION = {
     ROLE_DON: (
-        "Ты руководишь мафиозной стороной. "
-        "Ночью вместе с мафией выбираешь цель и ведешь команду к победе."
+        "Ты глава мафии. "
+        "Тебе решать, кто не проснется этой ночью."
+        " Держи команду под контролем и веди ее к победе."
     ),
     ROLE_COMMISSAR: (
-        "Ты главный сыщик города. "
-        "Ночью проверяешь игроков и ищешь тех, кто связан с мафией."
+        "Ты главный городской защитник и гроза мафии. "
+        "Ночью проверяй игроков и вычисляй преступников."
     ),
     ROLE_DOCTOR: (
-        "Ты ночной спасатель. "
-        "Выбирай, кого защитить, и не дай убийцам сократить ряды мирных."
+        "Тебе решать, кого спасти этой ночью. "
+        "Выбирай цель лечения и не дай убийцам сократить ряды мирных."
     ),
     ROLE_MISTRESS: (
-        "Ты мастер отвлечения. "
-        "Сбивай планы опасных ролей и помогай городу пережить ночи."
+        "Тебе нужно выжить в этом суровом мире. "
+        "Используй свои навыки, чтобы обезвредить любого персонажа на одни сутки."
     ),
     ROLE_BUM: (
-        "Ты случайный свидетель ночных событий. "
-        "Оказывайся рядом с нужными людьми и собирай ценную информацию."
+        "Ты можешь зайти за бутылкой к любому игроку "
+        "и стать свидетелем ночных событий."
+    ),
+    ROLE_ADVOCATE: (
+        "Ночью ты выбираешь, кого защищать. "
+        "Если выберешь мафию, Комиссар Каттани не распознает её и увидит мирного жителя."
     ),
     ROLE_SUICIDE: (
-        "Твоя цель - погибнуть на дневном голосовании. "
-        "Чем убедительнее сыграешь, тем быстрее выполнишь личное условие победы."
+        "Твоя цель - умереть на городском собрании. "
+        "Сыграй так, чтобы тебя вывели на казнь днем."
     ),
     ROLE_LUCKY: (
-        "Ты обычный житель, но фортуна на твоей стороне. "
-        "Иногда удача спасает тебя от ночной атаки."
+        "Твоя задача вычислить мафию и на городском собрании линчевать засранцев. "
+        "Если повезет, при покушении ты останешься жив."
     ),
     ROLE_KAMIKAZE: (
-        "Если тебя казнят днем, ты сможешь утащить за собой одного игрока. "
-        "Используй этот риск как рычаг давления в обсуждении."
+        "Днем и ночью ты обычный мирный житель, "
+        "но если тебя попытаются повесить, ты сможешь выбрать, "
+        "кого из игроков забрать с собой в могилу."
     ),
     ROLE_CITIZEN: (
-        "Ты мирный житель. "
-        "Слушай обсуждения, сопоставляй факты и голосуй против преступников."
+        "Твоя задача вычислить мафию "
+        "и на городском собрании линчевать засранцев."
+    ),
+    ROLE_MAFIA: (
+        "Твоя задача подчиняться Дону и убирать всех, кто стоит на вашем пути. "
+        "Однажды и ты сможешь стать Доном."
+    ),
+    ROLE_MANIAC: (
+        "Все вокруг должны умереть, кроме тебя, конечно. "
+        "Действуй скрытно и не попадись городу."
     ),
 }
 
@@ -89,6 +105,7 @@ ROLE_ACTION_RULES = {
     ROLE_DOCTOR: "Ход: ночь. Действие: лечит одного игрока, спасая от ночной атаки и снимая с него эффект Любовницы в эту ночь.",
     ROLE_MISTRESS: "Ход: ночь. Действие: блокирует действие цели на ночь и накладывает молчание в групповом чате на следующий день.",
     ROLE_BUM: "Ход: ночь. Действие: наблюдает за целью и получает отчет о ночных событиях рядом с ней.",
+    ROLE_ADVOCATE: "Ход: ночь. Действие: выбирает игрока для защиты от проверки комиссара.",
     ROLE_SUICIDE: "Ход: день. Цель: быть казненным на дневном голосовании для личной победы.",
     ROLE_LUCKY: "Пассивно: при ночной атаке имеет шанс 50% выжить.",
     ROLE_KAMIKAZE: "Пассивно: если его казнят днем, случайно забирает с собой еще одного игрока.",
@@ -119,6 +136,7 @@ def all_roles_info_text() -> str:
         ROLE_DOCTOR,
         ROLE_MISTRESS,
         ROLE_BUM,
+        ROLE_ADVOCATE,
         ROLE_SUICIDE,
         ROLE_LUCKY,
         ROLE_KAMIKAZE,
@@ -145,17 +163,17 @@ ROLE_PLAN_BY_COUNT: dict[int, list[str]] = {
     7: [ROLE_DON, ROLE_MAFIA, ROLE_COMMISSAR, ROLE_DOCTOR, ROLE_MISTRESS, ROLE_LUCKY, ROLE_CITIZEN],
     8: [ROLE_DON, ROLE_MAFIA, ROLE_MANIAC, ROLE_COMMISSAR, ROLE_DOCTOR, ROLE_LUCKY, ROLE_BUM, ROLE_CITIZEN],
     9: [ROLE_DON, ROLE_MAFIA, ROLE_MAFIA, ROLE_MANIAC, ROLE_COMMISSAR, ROLE_DOCTOR, ROLE_LUCKY, ROLE_BUM, ROLE_CITIZEN],
-    10: [ROLE_DON, ROLE_MAFIA, ROLE_MAFIA, ROLE_MANIAC, ROLE_COMMISSAR, ROLE_DOCTOR, ROLE_MISTRESS, ROLE_LUCKY, ROLE_BUM, ROLE_CITIZEN],
-    11: [ROLE_DON, ROLE_MAFIA, ROLE_MAFIA, ROLE_MANIAC, ROLE_COMMISSAR, ROLE_DOCTOR, ROLE_MISTRESS, ROLE_LUCKY, ROLE_BUM, ROLE_SUICIDE, ROLE_CITIZEN],
-    12: [ROLE_DON, ROLE_MAFIA, ROLE_MAFIA, ROLE_MANIAC, ROLE_COMMISSAR, ROLE_DOCTOR, ROLE_MISTRESS, ROLE_LUCKY, ROLE_BUM, ROLE_SUICIDE, ROLE_KAMIKAZE, ROLE_CITIZEN],
-    13: [ROLE_DON, ROLE_MAFIA, ROLE_MAFIA, ROLE_MANIAC, ROLE_COMMISSAR, ROLE_DOCTOR, ROLE_MISTRESS, ROLE_LUCKY, ROLE_BUM, ROLE_SUICIDE, ROLE_KAMIKAZE, ROLE_CITIZEN, ROLE_CITIZEN],
-    14: [ROLE_DON, ROLE_MAFIA, ROLE_MAFIA, ROLE_MANIAC, ROLE_COMMISSAR, ROLE_DOCTOR, ROLE_MISTRESS, ROLE_LUCKY, ROLE_BUM, ROLE_SUICIDE, ROLE_KAMIKAZE, ROLE_CITIZEN, ROLE_CITIZEN, ROLE_CITIZEN],
-    15: [ROLE_DON, ROLE_MAFIA, ROLE_MAFIA, ROLE_MAFIA, ROLE_MANIAC, ROLE_COMMISSAR, ROLE_DOCTOR, ROLE_MISTRESS, ROLE_LUCKY, ROLE_BUM, ROLE_SUICIDE, ROLE_KAMIKAZE, ROLE_CITIZEN, ROLE_CITIZEN, ROLE_CITIZEN],
-    16: [ROLE_DON, ROLE_MAFIA, ROLE_MAFIA, ROLE_MAFIA, ROLE_MANIAC, ROLE_COMMISSAR, ROLE_DOCTOR, ROLE_MISTRESS, ROLE_LUCKY, ROLE_BUM, ROLE_SUICIDE, ROLE_KAMIKAZE, ROLE_CITIZEN, ROLE_CITIZEN, ROLE_CITIZEN, ROLE_CITIZEN],
-    17: [ROLE_DON, ROLE_MAFIA, ROLE_MAFIA, ROLE_MAFIA, ROLE_MANIAC, ROLE_COMMISSAR, ROLE_DOCTOR, ROLE_MISTRESS, ROLE_LUCKY, ROLE_BUM, ROLE_SUICIDE, ROLE_KAMIKAZE, ROLE_CITIZEN, ROLE_CITIZEN, ROLE_CITIZEN, ROLE_CITIZEN, ROLE_CITIZEN],
-    18: [ROLE_DON, ROLE_MAFIA, ROLE_MAFIA, ROLE_MAFIA, ROLE_MANIAC, ROLE_COMMISSAR, ROLE_DOCTOR, ROLE_MISTRESS, ROLE_LUCKY, ROLE_BUM, ROLE_SUICIDE, ROLE_KAMIKAZE, ROLE_CITIZEN, ROLE_CITIZEN, ROLE_CITIZEN, ROLE_CITIZEN, ROLE_CITIZEN, ROLE_CITIZEN],
-    19: [ROLE_DON, ROLE_MAFIA, ROLE_MAFIA, ROLE_MAFIA, ROLE_MANIAC, ROLE_COMMISSAR, ROLE_DOCTOR, ROLE_MISTRESS, ROLE_LUCKY, ROLE_BUM, ROLE_SUICIDE, ROLE_KAMIKAZE, ROLE_CITIZEN, ROLE_CITIZEN, ROLE_CITIZEN, ROLE_CITIZEN, ROLE_CITIZEN, ROLE_CITIZEN, ROLE_CITIZEN],
-    20: [ROLE_DON, ROLE_MAFIA, ROLE_MAFIA, ROLE_MAFIA, ROLE_MANIAC, ROLE_COMMISSAR, ROLE_DOCTOR, ROLE_MISTRESS, ROLE_LUCKY, ROLE_BUM, ROLE_SUICIDE, ROLE_KAMIKAZE, ROLE_CITIZEN, ROLE_CITIZEN, ROLE_CITIZEN, ROLE_CITIZEN, ROLE_CITIZEN, ROLE_CITIZEN, ROLE_CITIZEN, ROLE_CITIZEN],
+    10: [ROLE_DON, ROLE_MAFIA, ROLE_MAFIA, ROLE_MANIAC, ROLE_COMMISSAR, ROLE_DOCTOR, ROLE_MISTRESS, ROLE_BUM, ROLE_ADVOCATE, ROLE_CITIZEN],
+    11: [ROLE_DON, ROLE_MAFIA, ROLE_MAFIA, ROLE_MANIAC, ROLE_COMMISSAR, ROLE_DOCTOR, ROLE_MISTRESS, ROLE_BUM, ROLE_ADVOCATE, ROLE_SUICIDE, ROLE_CITIZEN],
+    12: [ROLE_DON, ROLE_MAFIA, ROLE_MAFIA, ROLE_MANIAC, ROLE_COMMISSAR, ROLE_DOCTOR, ROLE_MISTRESS, ROLE_BUM, ROLE_ADVOCATE, ROLE_SUICIDE, ROLE_KAMIKAZE, ROLE_CITIZEN],
+    13: [ROLE_DON, ROLE_MAFIA, ROLE_MAFIA, ROLE_MANIAC, ROLE_COMMISSAR, ROLE_DOCTOR, ROLE_MISTRESS, ROLE_BUM, ROLE_ADVOCATE, ROLE_SUICIDE, ROLE_KAMIKAZE, ROLE_CITIZEN, ROLE_CITIZEN],
+    14: [ROLE_DON, ROLE_MAFIA, ROLE_MAFIA, ROLE_MANIAC, ROLE_COMMISSAR, ROLE_DOCTOR, ROLE_MISTRESS, ROLE_BUM, ROLE_ADVOCATE, ROLE_SUICIDE, ROLE_KAMIKAZE, ROLE_CITIZEN, ROLE_CITIZEN, ROLE_CITIZEN],
+    15: [ROLE_DON, ROLE_MAFIA, ROLE_MAFIA, ROLE_MAFIA, ROLE_MANIAC, ROLE_COMMISSAR, ROLE_DOCTOR, ROLE_MISTRESS, ROLE_BUM, ROLE_ADVOCATE, ROLE_SUICIDE, ROLE_KAMIKAZE, ROLE_CITIZEN, ROLE_CITIZEN, ROLE_CITIZEN],
+    16: [ROLE_DON, ROLE_MAFIA, ROLE_MAFIA, ROLE_MAFIA, ROLE_MANIAC, ROLE_COMMISSAR, ROLE_DOCTOR, ROLE_MISTRESS, ROLE_BUM, ROLE_ADVOCATE, ROLE_SUICIDE, ROLE_KAMIKAZE, ROLE_CITIZEN, ROLE_CITIZEN, ROLE_CITIZEN, ROLE_CITIZEN],
+    17: [ROLE_DON, ROLE_MAFIA, ROLE_MAFIA, ROLE_MAFIA, ROLE_MANIAC, ROLE_COMMISSAR, ROLE_DOCTOR, ROLE_MISTRESS, ROLE_BUM, ROLE_ADVOCATE, ROLE_SUICIDE, ROLE_KAMIKAZE, ROLE_CITIZEN, ROLE_CITIZEN, ROLE_CITIZEN, ROLE_CITIZEN, ROLE_CITIZEN],
+    18: [ROLE_DON, ROLE_MAFIA, ROLE_MAFIA, ROLE_MAFIA, ROLE_MANIAC, ROLE_COMMISSAR, ROLE_DOCTOR, ROLE_MISTRESS, ROLE_BUM, ROLE_ADVOCATE, ROLE_SUICIDE, ROLE_KAMIKAZE, ROLE_CITIZEN, ROLE_CITIZEN, ROLE_CITIZEN, ROLE_CITIZEN, ROLE_CITIZEN, ROLE_CITIZEN],
+    19: [ROLE_DON, ROLE_MAFIA, ROLE_MAFIA, ROLE_MAFIA, ROLE_MANIAC, ROLE_COMMISSAR, ROLE_DOCTOR, ROLE_MISTRESS, ROLE_BUM, ROLE_ADVOCATE, ROLE_SUICIDE, ROLE_KAMIKAZE, ROLE_CITIZEN, ROLE_CITIZEN, ROLE_CITIZEN, ROLE_CITIZEN, ROLE_CITIZEN, ROLE_CITIZEN, ROLE_CITIZEN],
+    20: [ROLE_DON, ROLE_MAFIA, ROLE_MAFIA, ROLE_MAFIA, ROLE_MANIAC, ROLE_COMMISSAR, ROLE_DOCTOR, ROLE_MISTRESS, ROLE_BUM, ROLE_ADVOCATE, ROLE_SUICIDE, ROLE_KAMIKAZE, ROLE_CITIZEN, ROLE_CITIZEN, ROLE_CITIZEN, ROLE_CITIZEN, ROLE_CITIZEN, ROLE_CITIZEN, ROLE_CITIZEN, ROLE_CITIZEN],
 }
 
 
@@ -1077,21 +1095,14 @@ class GameRoom:
         return (
             "🌃 Наступает ночь\n"
             "На улицы города выходят лишь самые отважные и бесстрашные.\n"
-            "Утром попробуем сосчитать их головы...\n\n"
-            f"{self.alive_players_text()}\n\n"
-            "🕵️ Комиссар Каттани ушел искать злодеев...\n"
-            "👨🏼‍⚕️ Доктор вышел на ночное дежурство...\n"
-            "🤵🏻 Мафия выбирает жертву...\n"
-            "🔪 Маньяк вышел на охоту...\n"
-            "💃 Любовница отправилась очаровывать жертву...\n"
-            "🧥 Бомж вышел наблюдать за ночной жизнью..."
+            "Утром попробуем сосчитать их головы..."
         )
 
     def night_media_caption(self) -> str:
         return (
-            "🌙 Наступает ночь\n"
-            "На улицах города становится опасно.\n"
-            "Роли делают ночные ходы в ЛС бота."
+            "🌃 Наступает ночь\n"
+            "На улицы города выходят лишь самые отважные и бесстрашные.\n"
+            "Утром попробуем сосчитать их головы..."
         )
 
     def day_intro_text(self) -> str:
