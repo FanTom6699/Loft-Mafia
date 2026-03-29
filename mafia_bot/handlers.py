@@ -1918,9 +1918,6 @@ async def on_registration_action(callback: CallbackQuery) -> None:
         if room.started:
             await callback.answer("Игра уже началась.", show_alert=True)
             return
-        if not await is_group_admin(callback.bot, chat_id, callback.from_user.id):
-            await callback.answer("Отменять игру может только админ группы.", show_alert=True)
-            return
         await clear_registration_post(callback.bot, room)
         cancel_phase_timer(chat_id)
         cancel_registration_timer(chat_id)
@@ -1933,9 +1930,6 @@ async def on_registration_action(callback: CallbackQuery) -> None:
         return
 
     if action == "cancel":
-        if not await is_group_admin(callback.bot, chat_id, callback.from_user.id):
-            await callback.answer("Отменять игру может только админ группы.", show_alert=True)
-            return
         await clear_registration_post(callback.bot, room)
         cancel_phase_timer(chat_id)
         cancel_registration_timer(chat_id)
@@ -2449,10 +2443,6 @@ async def cmd_close(message: Message) -> None:
     room = storage.get_room(message.chat.id)
     if room is None:
         await message.answer("Лобби не найдено.")
-        return
-
-    if not await is_group_admin(message.bot, message.chat.id, message.from_user.id):
-        await message.answer("Отменять игру может только админ группы.")
         return
 
     await clear_registration_post(message.bot, room)
