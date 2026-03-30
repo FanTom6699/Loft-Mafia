@@ -249,22 +249,18 @@ def format_killer_sources_text(sources: list[str]) -> str:
     labels: list[str] = []
     for source in sources:
         if source == "мафия":
-            labels.append("👑 Дон")
+            labels.append(role_mark_text(ROLE_DON))
         elif source == "маньяк":
-            labels.append("🔪 Маньяк")
+            labels.append(role_mark_text(ROLE_MANIAC))
         else:
             labels.append(source)
 
     # Keep source order but remove duplicates.
     unique_labels = list(dict.fromkeys(labels))
     if len(unique_labels) == 1:
-        if unique_labels[0] == "👑 Дон":
-            return "Говорят, к нему заходил 👑 Дон."
-        if unique_labels[0] == "🔪 Маньяк":
-            return "Говорят, к нему заходил 🔪 Маньяк."
-        return f"Говорят, к нему заходил {unique_labels[0]}."
+        return f"Говорят, у него в гостях был {unique_labels[0]}."
 
-    return "Говорят, к нему заходили " + " и ".join(unique_labels) + "."
+    return "Говорят, у него в гостях были " + " и ".join(unique_labels) + "."
 
 
 def registration_remaining_seconds(room) -> int:
@@ -285,7 +281,21 @@ async def start_registration_timer(room, bot: Bot, seconds: int) -> None:
 
     async def worker() -> None:
         try:
-            await asyncio.sleep(seconds)
+            warning_mark = 30
+            if seconds > warning_mark:
+                await asyncio.sleep(seconds - warning_mark)
+                current_room = storage.get_room(room.chat_id)
+                if current_room is not None and not current_room.started and current_room.registration_open:
+                    me = await bot.get_me()
+                    join_link = f"https://t.me/{me.username}?start=join_{room.chat_id}"
+                    await bot.send_message(
+                        room.chat_id,
+                        f"До окончания регистрации осталось {warning_mark} сек.",
+                        reply_markup=registration_lobby_keyboard(join_link),
+                    )
+                await asyncio.sleep(warning_mark)
+            else:
+                await asyncio.sleep(seconds)
             await process_registration_timeout(bot, room.chat_id)
         except asyncio.CancelledError:
             return
@@ -387,7 +397,7 @@ async def launch_game_from_registration(bot: Bot, room, chat_id: int, chat_title
             print(f"[ERROR] send_message(night_media_caption): {e2!r}")
 
     try:
-        await bot.send_message(chat_id, night_status_text(room))
+        await bot.send_message(chat_id, night_status_text(room), reply_markup=keyboard)
     except Exception as e:
         print(f"[ERROR] send_message(Живых игроков): {e!r}")
 
@@ -616,13 +626,19 @@ async def registration_join_link(message: Message, chat_id: int) -> str:
 
 
 def registration_text(room) -> str:
-    lines = ["<b>Регистрация в игру Мафия</b>"]
+    lines = ["Ведётся набор в игру", ""]
     if not room.players:
-        lines.append("Пока никого нет.")
+        lines.append("Зарегистрировались::")
+        lines.append("Пока никто не зарегистрировался.")
+        lines.append("")
+        lines.append("Итого 0 чел.")
         return "\n".join(lines)
 
-    for i, player in enumerate(room.players.values(), start=1):
-        lines.append(f"{i}. {player_display_name(player)}")
+    joined_names = ", ".join(player_display_name(player) for player in room.players.values())
+    lines.append("Зарегистрировались::")
+    lines.append(joined_names)
+    lines.append("")
+    lines.append(f"Итого {len(room.players)} чел.")
     return "\n".join(lines)
 
 
@@ -630,12 +646,7 @@ def registration_post_text(room) -> str:
     remaining = registration_remaining_seconds(room)
     if remaining <= 0:
         remaining = REGISTRATION_SECONDS
-    return (
-        registration_text(room)
-        + "\n\nНажми кнопку ниже, чтобы зарегистрироваться через ЛС."
-        + f"\n⏱ Автостарт через {remaining} сек."
-        + " Если нужно больше времени - продлите: /extend"
-    )
+    return registration_text(room) + f"\n\nДо окончания регистрации осталось {remaining} сек."
 
 
 async def private_bot_link(bot: Bot) -> str:
@@ -712,7 +723,7 @@ def registration_lobby_keyboard(join_link: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [
-                InlineKeyboardButton(text="Зарегистрироваться", url=join_link),
+                InlineKeyboardButton(text="🕴🏻 Присоединиться", url=join_link),
             ],
         ]
     )
@@ -989,9 +1000,11 @@ def night_status_text(room) -> str:
     alive = room.alive_players()
     seat_positions = {p.user_id: i for i, p in enumerate(room.players.values(), start=1)}
     lines = ["Живые игроки:"]
-    for player in alive:
+    for player in sorted(alive, key=lambda p: seat_positions.get(p.user_id, 10**9)):
         seat_no = seat_positions.get(player.user_id)
-        safe_name = escape(player.full_name)
+        raw_name = (player.full_name or "").strip()
+        fallback_name = f"Игрок {seat_no}" if seat_no is not None else f"Игрок {player.user_id}"
+        safe_name = escape(raw_name if raw_name else fallback_name)
         if seat_no is None:
             lines.append(f"<a href=\"tg://user?id={player.user_id}\">{safe_name}</a>")
         else:
@@ -1066,7 +1079,7 @@ async def push_trial_vote_menus(bot: Bot, room, candidate_name: str) -> None:
     try:
         await bot.send_message(
             room.chat_id,
-            f"Выгоняем {candidate_name}?",
+            f"Вы точно хотите линчевать {candidate_name}?",
             reply_markup=trial_vote_keyboard(room.chat_id, yes_count, no_count),
         )
     except Exception as e:
@@ -1161,7 +1174,8 @@ async def process_night_end(bot: Bot, chat_id: int, timer_reason: str | None = N
                 role_text = role_mark_text(dead.role)
                 sources = kill_sources.get(dead.user_id, [])
                 killer_text = format_killer_sources_text(sources)
-                text = f"Сегодня был жестоко убит {role_text} {dead.full_name}..."
+                safe_name = escape((dead.full_name or "").strip() or f"Игрок {dead.user_id}")
+                text = f"Сегодня был жестоко убит {role_text} {safe_name}"
                 if killer_text:
                     text += f"\n{killer_text}"
                 await bot.send_message(chat_id, text)
@@ -1169,7 +1183,14 @@ async def process_night_end(bot: Bot, chat_id: int, timer_reason: str | None = N
         else:
             await bot.send_message(chat_id, "🌙 Этой ночью было тихо. Никто не погиб.")
 
-        await bot.send_message(chat_id, room.alive_players_text())
+        day_summary = (
+            room.alive_players_text()
+            + "\n\n"
+            + room.alive_role_hints_text()
+            + "\n\n"
+            + "Сейчас самое время обсудить результаты ночи, разобраться в причинах и следствиях..."
+        )
+        await bot.send_message(chat_id, day_summary)
 
         if room.phase == PHASE_FINISHED:
             ensure_stats_recorded(room)
@@ -1180,14 +1201,6 @@ async def process_night_end(bot: Bot, chat_id: int, timer_reason: str | None = N
             return
 
         room.start_day_discussion()
-        await bot.send_message(
-            chat_id,
-            (
-                "Этап обсуждения начался.\n"
-                "Общайтесь и ищите подозреваемых.\n"
-                f"До этапа выбора кандидата: {DAY_DISCUSSION_SECONDS} сек."
-            ),
-        )
         await start_phase_timer(room, bot)
         persist_room(room)
 
@@ -1262,14 +1275,15 @@ async def process_day_end(bot: Bot, chat_id: int, timer_reason: str | None = Non
                     if vote_lines:
                         await bot.send_message(
                             chat_id,
-                            "Этап номинации завершен без единого кандидата: несколько лидеров набрали одинаковый максимум.\\n"
-                            "Итоги голосования:\\n"
-                            + "\\n".join(vote_lines),
+                            "Голоса на этапе выбора кандидата разделились поровну.\n"
+                            "🗿 Жители решили никого не вешать...\n\n"
+                            "Итоги голосования:\n"
+                            + "\n".join(vote_lines),
                         )
                 else:
                     await bot.send_message(
                         chat_id,
-                        "Этап номинации завершен без кандидата: не получено ни одного действительного голоса.",
+                        "Голосование окончено\n🗿 Жители решили никого не вешать...",
                     )
 
                 ok_end, info_end = room.end_day_no_lynch()
@@ -1287,6 +1301,7 @@ async def process_day_end(bot: Bot, chat_id: int, timer_reason: str | None = Non
                     await bot.send_message(
                         chat_id,
                         night_status_text(room),
+                        reply_markup=keyboard,
                     )
                     await push_phase_action_menus(bot, room)
                     await start_phase_timer(room, bot)
@@ -1313,6 +1328,7 @@ async def process_day_end(bot: Bot, chat_id: int, timer_reason: str | None = Non
                     await bot.send_message(
                         chat_id,
                         night_status_text(room),
+                        reply_markup=keyboard,
                     )
                     await push_phase_action_menus(bot, room)
                     await start_phase_timer(room, bot)
@@ -1327,7 +1343,7 @@ async def process_day_end(bot: Bot, chat_id: int, timer_reason: str | None = Non
                 chat_id,
                 (
                     "Пришло время определить и наказать виновного.\n"
-                    f"Выгоняем {candidate.full_name}?\n"
+                    f"Вы точно хотите линчевать {candidate.full_name}?\n"
                     f"Голосование продлится: {DAY_TRIAL_SECONDS} сек."
                 ),
             )
@@ -1344,17 +1360,14 @@ async def process_day_end(bot: Bot, chat_id: int, timer_reason: str | None = Non
                 print(f"[PHASE] process_day_end: trial resolve failed for chat_id={chat_id}, info={info}")
                 await bot.send_message(chat_id, info)
                 return
-            await bot.send_message(chat_id, f"Результаты голосования: за {yes_count}, против {no_count}.")
+            await bot.send_message(chat_id, f"Результаты голосования:\n{yes_count} 👍 | {no_count} 👎")
             await asyncio.sleep(1)
 
             if eliminated:
                 first = eliminated[0]
                 role_text = role_mark_text(first.role)
-                alive_voters_count = len(room.alive_players()) + len(eliminated)
-                if yes_count == alive_voters_count:
-                    await bot.send_message(chat_id, f"Все согласились. Выгоняем {first.full_name} ({role_text}).")
-                else:
-                    await bot.send_message(chat_id, f"Выгоняем {first.full_name} ({role_text}).")
+                await bot.send_message(chat_id, f"Вешаем {first.full_name}! :)")
+                await bot.send_message(chat_id, f"{first.full_name} был {role_text}")
                 try:
                     await bot.send_message(
                         first.user_id,
@@ -1369,7 +1382,11 @@ async def process_day_end(bot: Bot, chat_id: int, timer_reason: str | None = Non
                     second_role = role_mark_text(second.role)
                     await bot.send_message(chat_id, f"💣 Камикадзе забрал с собой {second.full_name} ({second_role}).")
             else:
-                await bot.send_message(chat_id, "Игрок остается в игре.")
+                await bot.send_message(
+                    chat_id,
+                    f"Мнения жителей разошлись ({yes_count} 👍 | {no_count} 👎 )... "
+                    "Разошлись и сами жители, так никого и не повесив...",
+                )
 
             if don_transfer_note:
                 await announce_don_transfer(room, bot, don_successor_id)
@@ -1393,6 +1410,7 @@ async def process_day_end(bot: Bot, chat_id: int, timer_reason: str | None = Non
             await bot.send_message(
                 chat_id,
                 night_status_text(room),
+                reply_markup=keyboard,
             )
             await push_phase_action_menus(bot, room)
             await start_phase_timer(room, bot)
@@ -1580,9 +1598,7 @@ async def cmd_start(message: Message, command: CommandObject) -> None:
 
         await message.answer(
             (
-                "<b>Регистрация завершена</b>\n\n"
-                f"Чат: <b>{room.chat_title or room.chat_id}</b>\n"
-                f"Ник в лобби: <b>{nickname}</b>"
+                f"Ты присоединился к игре в <b>{room.chat_title or room.chat_id}</b>."
             )
         )
         await refresh_registration_post(message, room)
@@ -2039,7 +2055,7 @@ async def on_trial_callback(callback: CallbackQuery) -> None:
     choice_text = "ЗА" if approve else "ПРОТИВ"
     try:
         await callback.message.edit_text(
-            f"Выгоняем {candidate_name}?",
+            f"Вы точно хотите линчевать {candidate_name}?",
             reply_markup=trial_vote_keyboard(chat_id, yes_count, no_count),
         )
     except Exception:

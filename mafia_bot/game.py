@@ -1015,7 +1015,10 @@ class GameRoom:
 
         parts = []
         for role, count in sorted(counts.items()):
-            parts.append(f"{ROLE_EMOJI.get(role, '')} <b>{role}</b> - <b>{count}</b>".strip())
+            if count == 1:
+                parts.append(f"{ROLE_EMOJI.get(role, '')} <b>{role}</b>".strip())
+            else:
+                parts.append(f"{ROLE_EMOJI.get(role, '')} <b>{role}</b> - <b>{count}</b>".strip())
         return "Кто-то из них:\n" + "\n".join(parts)
 
     def alive_players_text(self) -> str:
@@ -1024,10 +1027,12 @@ class GameRoom:
             return "Живых игроков нет."
 
         seat_positions = {p.user_id: i for i, p in enumerate(self.players.values(), start=1)}
-        lines = [f"Живые игроки: {len(alive)}"]
-        for player in alive:
+        lines = ["Живые игроки:"]
+        for player in sorted(alive, key=lambda p: seat_positions.get(p.user_id, 10**9)):
             seat_no = seat_positions.get(player.user_id)
-            safe_name = escape(player.full_name)
+            raw_name = (player.full_name or "").strip()
+            fallback_name = f"Игрок {seat_no}" if seat_no is not None else f"Игрок {player.user_id}"
+            safe_name = escape(raw_name if raw_name else fallback_name)
             if seat_no is None:
                 lines.append(f"<a href=\"tg://user?id={player.user_id}\">{safe_name}</a>")
             else:
@@ -1043,10 +1048,13 @@ class GameRoom:
 
         parts = []
         for role, count in sorted(counts.items()):
-            parts.append(f"{ROLE_EMOJI.get(role, '')} <b>{role}</b> - <b>{count}</b>".strip())
+            if count == 1:
+                parts.append(f"{ROLE_EMOJI.get(role, '')} <b>{role}</b>".strip())
+            else:
+                parts.append(f"{ROLE_EMOJI.get(role, '')} <b>{role}</b> - <b>{count}</b>".strip())
         return (
             "Кто-то из них:\n"
-            + "\n".join(parts)
+            + ", ".join(parts)
             + f"\nВсего: {len(self.alive_players())} чел."
         )
 
