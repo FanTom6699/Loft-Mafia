@@ -57,7 +57,7 @@ def read_phase_seconds(name: str, default: int) -> int:
 NIGHT_PHASE_SECONDS = read_phase_seconds("NIGHT_PHASE_SECONDS", 90)
 DAY_DISCUSSION_SECONDS = read_phase_seconds("DAY_DISCUSSION_SECONDS", 60)
 DAY_NOMINATION_SECONDS = read_phase_seconds("DAY_NOMINATION_SECONDS", 60)
-DAY_TRIAL_SECONDS = read_phase_seconds("DAY_TRIAL_SECONDS", 30)
+DAY_TRIAL_SECONDS = read_phase_seconds("DAY_TRIAL_SECONDS", 60)
 REGISTRATION_SECONDS = read_phase_seconds("REGISTRATION_SECONDS", 60)
 REGISTRATION_EXTENSION_SECONDS = read_phase_seconds("REGISTRATION_EXTENSION_SECONDS", 30)
 RESTART_EXPIRED_PHASE_POLICY = os.getenv("RESTART_EXPIRED_PHASE_POLICY", "catch_up").strip().lower()
@@ -204,6 +204,24 @@ def skipped_turn_keyboard(chat_id: int) -> InlineKeyboardMarkup:
     )
 
 
+def locked_choice_keyboard(selected_name: str) -> InlineKeyboardMarkup:
+    label = f"Ты выбрал {selected_name}".strip()
+    if len(label) > 64:
+        label = label[:61] + "..."
+    return InlineKeyboardMarkup(
+        inline_keyboard=[[InlineKeyboardButton(text=label, callback_data="noop:locked")]]
+    )
+
+
+def locked_choice_text(room, actor_user_id: int, selected_name: str, selected_user_id: int | None = None) -> str:
+    prompt = build_action_prompt_text(room, actor_user_id)
+    safe_name = escape(selected_name)
+    selected_mark = safe_name
+    if selected_user_id is not None:
+        selected_mark = f"<a href=\"tg://user?id={selected_user_id}\">{safe_name}</a>"
+    return f"{prompt}\n\nТы выбрал {selected_mark}"
+
+
 def night_skipped_user_ids(room) -> list[int]:
     skipped: list[int] = []
 
@@ -214,12 +232,17 @@ def night_skipped_user_ids(room) -> list[int]:
             skipped.append(player.user_id)
         elif player.role == "Комиссар Каттани" and room.commissar_target_id is None:
             skipped.append(player.user_id)
+        elif player.role == ROLE_ADVOCATE and room.advocate_target_id is None:
+            skipped.append(player.user_id)
         elif player.role == "Маньяк" and room.maniac_target_id is None:
             skipped.append(player.user_id)
         elif player.role == "Любовница" and room.mistress_target_id is None:
             skipped.append(player.user_id)
         elif player.role == "Бомж" and room.bum_target_id is None:
             skipped.append(player.user_id)
+
+    if room.kamikaze_pending_user_id is not None and room.kamikaze_target_id is None:
+        skipped.append(room.kamikaze_pending_user_id)
 
     return skipped
 
@@ -343,9 +366,7 @@ async def launch_game_from_registration(bot: Bot, room, chat_id: int, chat_title
         async def send_one_role_card(player) -> tuple[str, bool]:
             name = player_display_name(player)
             try:
-                card_text = role_card_text(player.role, chat_title or room.chat_title or "Групповой чат")
-                if player.role in {ROLE_DON, ROLE_MAFIA}:
-                    card_text += mafia_allies_text(room)
+                card_text = role_card_for_player(room, player, chat_title or room.chat_title or "Групповой чат")
                 await asyncio.wait_for(bot.send_message(player.user_id, card_text), timeout=8)
                 return name, True
             except Exception as e:
@@ -666,9 +687,11 @@ def trial_vote_keyboard(chat_id: int, yes_count: int, no_count: int) -> InlineKe
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [
-                InlineKeyboardButton(text=f"За ({yes_count})", callback_data=f"trial:yes:{chat_id}"),
-                InlineKeyboardButton(text=f"Против ({no_count})", callback_data=f"trial:no:{chat_id}"),
-            ]
+                InlineKeyboardButton(text=f"👍 {yes_count}", callback_data=f"trial:yes:{chat_id}"),
+            ],
+            [
+                InlineKeyboardButton(text=f"👎 {no_count}", callback_data=f"trial:no:{chat_id}"),
+            ],
         ]
     )
 
@@ -848,12 +871,16 @@ def selected_target_for_actor(room, actor_user_id: int) -> int | None:
             return room.doctor_target_id
         if actor.role == "Комиссар Каттани":
             return room.commissar_target_id
+        if actor.role == ROLE_ADVOCATE:
+            return room.advocate_target_id
         if actor.role == "Маньяк":
             return room.maniac_target_id
         if actor.role == "Любовница":
             return room.mistress_target_id
         if actor.role == "Бомж":
             return room.bum_target_id
+        if actor.role == ROLE_KAMIKAZE and room.kamikaze_pending_user_id == actor_user_id:
+            return room.kamikaze_target_id
 
     if room.phase == "day" and room.day_stage == DAY_STAGE_NOMINATION:
         return room.day_votes.get(actor_user_id)
@@ -863,7 +890,15 @@ def selected_target_for_actor(room, actor_user_id: int) -> int | None:
 
 def build_action_keyboard(room, actor_user_id: int) -> InlineKeyboardMarkup | None:
     actor = room.get_player(actor_user_id)
-    if actor is None or not actor.alive:
+    if actor is None:
+        return None
+
+    kamikaze_revenge_mode = (
+        room.phase == PHASE_NIGHT
+        and actor.role == ROLE_KAMIKAZE
+        and room.kamikaze_pending_user_id == actor_user_id
+    )
+    if not actor.alive and not kamikaze_revenge_mode:
         return None
 
     rows: list[list[InlineKeyboardButton]] = []
@@ -916,6 +951,16 @@ def build_action_keyboard(room, actor_user_id: int) -> InlineKeyboardMarkup | No
                         )
                     ]
                 )
+        if actor.role == ROLE_ADVOCATE:
+            for target in room.alive_players():
+                rows.append(
+                    [
+                        InlineKeyboardButton(
+                            text=mark(target_label(target), target.user_id),
+                            callback_data=f"act:advocate:{room.chat_id}:{target.user_id}",
+                        )
+                    ]
+                )
         if actor.role == "Маньяк":
             for target in alive_targets:
                 rows.append(
@@ -928,6 +973,8 @@ def build_action_keyboard(room, actor_user_id: int) -> InlineKeyboardMarkup | No
                 )
         if actor.role == "Любовница":
             for target in alive_targets:
+                if room.mistress_last_target_id is not None and target.user_id == room.mistress_last_target_id:
+                    continue
                 rows.append(
                     [
                         InlineKeyboardButton(
@@ -943,6 +990,16 @@ def build_action_keyboard(room, actor_user_id: int) -> InlineKeyboardMarkup | No
                         InlineKeyboardButton(
                             text=mark(target_label(target), target.user_id),
                             callback_data=f"act:bum:{room.chat_id}:{target.user_id}",
+                        )
+                    ]
+                )
+        if kamikaze_revenge_mode:
+            for target in alive_players:
+                rows.append(
+                    [
+                        InlineKeyboardButton(
+                            text=mark(target_label(target), target.user_id),
+                            callback_data=f"act:kamikaze:{room.chat_id}:{target.user_id}",
                         )
                     ]
                 )
@@ -975,23 +1032,35 @@ def build_action_keyboard(room, actor_user_id: int) -> InlineKeyboardMarkup | No
 
 def build_action_prompt_text(room, actor_user_id: int) -> str:
     actor = room.get_player(actor_user_id)
-    if actor is None or not actor.alive:
+    if actor is None:
+        return "Выбери действие на текущую фазу:"
+
+    if (
+        room.phase == PHASE_NIGHT
+        and actor.role == ROLE_KAMIKAZE
+        and room.kamikaze_pending_user_id == actor_user_id
+    ):
+        return "Тебя линчевали на дневном собрании :(\nКого заберём с собой в могилу?"
+
+    if not actor.alive:
         return "Выбери действие на текущую фазу:"
 
     if room.phase == "night":
-        if actor.role in {"Дон", "Мафия"}:
-            return "🌙 Ночь. Выбери, кого мафия будет устранять:"
-        if actor.role == "Доктор":
-            return "🌙 Ночь. Выбери, кого лечить:"
-        if actor.role == "Комиссар Каттани":
-            return "🌙 Ночь. Выбери, кого проверить:"
-        if actor.role == "Маньяк":
-            return "🌙 Ночь. Выбери, кого атаковать:"
-        if actor.role == "Любовница":
-            return "🌙 Ночь. Выбери, кого отвлечь:"
-        if actor.role == "Бомж":
-            return "🌙 Ночь. Выбери, за кем наблюдать:"
-        return "🌙 Ночь. Выбери действие:"
+        if actor.role in {ROLE_DON, ROLE_MAFIA}:
+            return "<b>Мафия проводит голосование за следующую жертву:</b>"
+        if actor.role == ROLE_MANIAC:
+            return "<b>Кого будет убивать?</b>"
+        if actor.role == ROLE_MISTRESS:
+            return "<b>С кем будем спать?</b>"
+        if actor.role == ROLE_DOCTOR:
+            return "<b>Кого будем лечить?</b>"
+        if actor.role == ROLE_BUM:
+            return "<b>К кому пойдём за бутылкой?</b>"
+        if actor.role == ROLE_ADVOCATE:
+            return "<b>Кого будем защищать от правосудия?</b>"
+        if actor.role == ROLE_COMMISSAR:
+            return "<b>Кого будем проверять?</b>"
+        return "Сейчас у твоей роли нет активных ночных действий."
 
     if room.phase == "day" and room.day_stage == DAY_STAGE_NOMINATION:
         return "🏙 День. Выбери кандидата на повешение или пропусти голосование:"
@@ -1076,6 +1145,28 @@ async def push_phase_action_menus(bot: Bot, room) -> None:
             )
 
 
+async def push_kamikaze_revenge_menu(bot: Bot, room) -> None:
+    user_id = room.kamikaze_pending_user_id
+    if user_id is None:
+        return
+    if room.kamikaze_target_id is not None:
+        return
+
+    keyboard = build_action_keyboard(room, user_id)
+    if keyboard is None:
+        return
+
+    try:
+        prompt_text = build_action_prompt_text(room, user_id)
+        sent = await bot.send_message(user_id, prompt_text, reply_markup=keyboard)
+        track_action_menu_message(room.chat_id, user_id, sent.message_id)
+    except Exception:
+        await bot.send_message(
+            room.chat_id,
+            "Не смог отправить меню камикадзе. Пусть напишет боту /start в личке.",
+        )
+
+
 async def push_trial_vote_menus(bot: Bot, room, candidate_name: str) -> None:
     print(f"[TRIAL] push_trial_vote_menus: candidate={candidate_name}, chat_id={room.chat_id}")
     yes_count, no_count = room.trial_vote_counts()
@@ -1108,15 +1199,23 @@ async def announce_don_transfer(room, bot: Bot, don_successor_id: int | None) ->
         return
 
     don_name = player_display_name(new_don)
-    await bot.send_message(room.chat_id, "🤵🏻 В мафиозной семье выбран новый Дон.")
+    await bot.send_message(room.chat_id, "🤵🏼 Мафия унаследовал роль 🤵🏻 Дон")
     await send_mafia_private_update(
         room,
         bot,
-        (
-            f"👑 Власть семьи переходит к {don_name}.\n"
-            f"Теперь он - {role_mark_text(ROLE_DON)} и принимает решающее слово мафии."
-        ),
+        f"{don_name} - новый 🤵🏻 Дон",
     )
+
+
+async def announce_commissar_transfer(room, bot: Bot, commissar_successor_id: int | None) -> None:
+    if commissar_successor_id is None:
+        return
+
+    await bot.send_message(room.chat_id, "👮🏼‍♂️ Сержант унаследовал роль 🕵️‍ Комиссар Каттани")
+    try:
+        await bot.send_message(commissar_successor_id, "Теперь ты 🕵️‍ Комиссар Каттани")
+    except Exception:
+        pass
 
 
 async def prompt_last_words(bot: Bot, room, eliminated) -> None:
@@ -1144,9 +1243,19 @@ async def process_night_end(bot: Bot, chat_id: int, timer_reason: str | None = N
             return
 
         cancel_phase_timer(chat_id)
+        mafia_alive_tonight = any(player.alive and player.role in {ROLE_DON, ROLE_MAFIA} for player in room.players.values())
+        mafia_target_tonight = room.current_mafia_target_id()
         skipped_user_ids = night_skipped_user_ids(room)
         await mark_skipped_night_menus(bot, room, skipped_user_ids)
-        ok, info, eliminated, don_transfer_note, don_successor_id = room.resolve_night()
+        (
+            ok,
+            info,
+            eliminated,
+            don_transfer_note,
+            don_successor_id,
+            commissar_transfer_note,
+            commissar_successor_id,
+        ) = room.resolve_night()
         if not ok:
             await bot.send_message(chat_id, info)
             return
@@ -1169,6 +1278,10 @@ async def process_night_end(bot: Bot, chat_id: int, timer_reason: str | None = N
 
         if don_transfer_note:
             await announce_don_transfer(room, bot, don_successor_id)
+        if commissar_transfer_note:
+            await announce_commissar_transfer(room, bot, commissar_successor_id)
+        if mafia_alive_tonight and mafia_target_tonight is None:
+            await bot.send_message(chat_id, "🚷 🤵🏻 Дон сегодня не в настроении")
 
         if room.last_doctor_saved_target_id is not None:
             await bot.send_message(chat_id, "👨🏼‍⚕️ Доктор спас кого-то от смерти.")
@@ -1307,6 +1420,7 @@ async def process_day_end(bot: Bot, chat_id: int, timer_reason: str | None = Non
                         reply_markup=keyboard,
                     )
                     await push_phase_action_menus(bot, room)
+                    await push_kamikaze_revenge_menu(bot, room)
                     await start_phase_timer(room, bot)
                     persist_room(room)
                     print(f"[PHASE] process_day_end: transitioned to night after no-lynch for chat_id={chat_id}")
@@ -1334,6 +1448,7 @@ async def process_day_end(bot: Bot, chat_id: int, timer_reason: str | None = Non
                         reply_markup=keyboard,
                     )
                     await push_phase_action_menus(bot, room)
+                    await push_kamikaze_revenge_menu(bot, room)
                     await start_phase_timer(room, bot)
                     persist_room(room)
                     print(f"[PHASE] process_day_end: transitioned to night after missing candidate fallback for chat_id={chat_id}")
@@ -1342,14 +1457,6 @@ async def process_day_end(bot: Bot, chat_id: int, timer_reason: str | None = Non
             room.start_day_trial(candidate.user_id)
             print(f"[PHASE] process_day_end: trial started for chat_id={chat_id}, candidate_id={candidate.user_id}, candidate_name={candidate.full_name}")
             persist_room(room)
-            await bot.send_message(
-                chat_id,
-                (
-                    "Пришло время определить и наказать виновного.\n"
-                    f"Вы точно хотите линчевать {candidate.full_name}?\n"
-                    f"Голосование продлится: {DAY_TRIAL_SECONDS} сек."
-                ),
-            )
             await push_trial_vote_menus(bot, room, candidate.full_name)
             await start_phase_timer(room, bot)
             print(f"[PHASE] process_day_end: trial menus sent and timer started for chat_id={chat_id}")
@@ -1358,24 +1465,39 @@ async def process_day_end(bot: Bot, chat_id: int, timer_reason: str | None = Non
         if room.day_stage == DAY_STAGE_TRIAL:
             yes_count, no_count = room.trial_vote_counts()
             print(f"[PHASE] process_day_end: resolving trial for chat_id={chat_id}, yes_count={yes_count}, no_count={no_count}, votes={room.trial_votes}")
-            ok, info, eliminated, don_transfer_note, don_successor_id = room.resolve_day_trial()
+            (
+                ok,
+                info,
+                eliminated,
+                don_transfer_note,
+                don_successor_id,
+                commissar_transfer_note,
+                commissar_successor_id,
+            ) = room.resolve_day_trial()
             if not ok:
                 print(f"[PHASE] process_day_end: trial resolve failed for chat_id={chat_id}, info={info}")
                 await bot.send_message(chat_id, info)
                 return
-            await bot.send_message(chat_id, f"Результаты голосования:\n{yes_count} 👍 | {no_count} 👎")
-            await asyncio.sleep(1)
 
             if eliminated:
                 first = eliminated[0]
                 role_text = role_mark_text(first.role)
-                await bot.send_message(chat_id, f"Вешаем {first.full_name}! :)")
+                await bot.send_message(
+                    chat_id,
+                    f"Результаты голосования:\n{yes_count} 👍 | {no_count} 👎\n\nВешаем {first.full_name}! :)",
+                )
                 await bot.send_message(chat_id, f"{first.full_name} был {role_text}")
                 try:
-                    await bot.send_message(
-                        first.user_id,
-                        "Тебя линчевали на дневном голосовании.",
-                    )
+                    if first.role == ROLE_KAMIKAZE:
+                        await bot.send_message(
+                            first.user_id,
+                            "Тебя линчевали на дневном собрании :(\nКого заберём с собой в могилу?",
+                        )
+                    else:
+                        await bot.send_message(
+                            first.user_id,
+                            "Тебя линчевали на дневном голосовании.",
+                        )
                 except Exception:
                     pass
                 if first.role == "Самоубийца":
@@ -1387,12 +1509,14 @@ async def process_day_end(bot: Bot, chat_id: int, timer_reason: str | None = Non
             else:
                 await bot.send_message(
                     chat_id,
-                    f"Мнения жителей разошлись ({yes_count} 👍 | {no_count} 👎 )... "
-                    "Разошлись и сами жители, так никого и не повесив...",
+                    "Мнения жителей разошлись\n"
+                    f"({yes_count} 👍 | {no_count} 👎 )... Разошлись и сами жители, так никого и не повесив...",
                 )
 
             if don_transfer_note:
                 await announce_don_transfer(room, bot, don_successor_id)
+            if commissar_transfer_note:
+                await announce_commissar_transfer(room, bot, commissar_successor_id)
 
             if room.phase == PHASE_FINISHED:
                 ensure_stats_recorded(room)
@@ -1416,6 +1540,7 @@ async def process_day_end(bot: Bot, chat_id: int, timer_reason: str | None = Non
                 reply_markup=keyboard,
             )
             await push_phase_action_menus(bot, room)
+            await push_kamikaze_revenge_menu(bot, room)
             await start_phase_timer(room, bot)
             persist_room(room)
             return
@@ -1550,6 +1675,45 @@ def mafia_allies_text(room) -> str:
         role_mark = role_mark_text(ally.role)
         lines.append(f"  {ally.full_name} - {role_mark}")
     return "\n".join(lines)
+
+
+def city_power_allies_text(room, role: str) -> str:
+    lines: list[str] = []
+    if role == ROLE_SERGEANT:
+        commissar = next((player for player in room.players.values() if player.role == ROLE_COMMISSAR), None)
+        if commissar is not None:
+            lines.append(f"     {commissar.full_name} - 🕵️‍ Комиссар Каттани")
+    elif role == ROLE_COMMISSAR:
+        sergeant = next((player for player in room.players.values() if player.role == ROLE_SERGEANT), None)
+        if sergeant is not None:
+            lines.append(f"     {sergeant.full_name} - 👮🏼‍♂️ Сержант")
+
+    if not lines:
+        return ""
+
+    return "\n\nЗапомни своих союзников:\n" + "\n".join(lines)
+
+
+def role_card_for_player(room, player, chat_title: str) -> str:
+    if player.role == ROLE_SERGEANT:
+        base = (
+            "Ты - 👮🏼‍♂️ Сержант!\n"
+            "Помощник комиссара Каттани. Он будет информировать тебя о своих действиях "
+            "и держать в курсе событий. Если комиссар погибнет - ты займёшь его место."
+        )
+        return base + city_power_allies_text(room, ROLE_SERGEANT)
+
+    if player.role == ROLE_COMMISSAR:
+        base = (
+            "Ты - 🕵️‍ Комиссар Каттани!\n"
+            "Главный городской защитник и гроза мафии..."
+        )
+        return base + city_power_allies_text(room, ROLE_COMMISSAR)
+
+    card_text = role_card_text(player.role, chat_title)
+    if player.role in {ROLE_DON, ROLE_MAFIA}:
+        card_text += mafia_allies_text(room)
+    return card_text
 
 
 @router.message(CommandStart())
@@ -2111,9 +2275,18 @@ async def on_action_callback(callback: CallbackQuery) -> None:
         return
 
     actor = room.get_player(callback.from_user.id)
-    if actor is None or not actor.alive:
+    if actor is None:
         await callback.answer("Ты не участвуешь в этой фазе.", show_alert=True)
         return
+    if not actor.alive:
+        is_kamikaze_revenge = (
+            room.phase == PHASE_NIGHT
+            and actor.role == ROLE_KAMIKAZE
+            and room.kamikaze_pending_user_id == actor.user_id
+        )
+        if not is_kamikaze_revenge:
+            await callback.answer("Ты не участвуешь в этой фазе.", show_alert=True)
+            return
 
     async def announce_night_role_once(role_name: str) -> None:
         if room.phase != "night":
@@ -2137,6 +2310,9 @@ async def on_action_callback(callback: CallbackQuery) -> None:
         await callback.bot.send_message(room.chat_id, announcement_text)
 
     if action == "kill":
+        if room.night_votes.get(callback.from_user.id) is not None:
+            await callback.answer("Выбор уже зафиксирован до конца ночи.", show_alert=True)
+            return
         ok, info = room.set_night_vote(callback.from_user.id, target_id)
         await callback.answer(info, show_alert=not ok)
         if ok:
@@ -2167,40 +2343,80 @@ async def on_action_callback(callback: CallbackQuery) -> None:
                         "🤵🏻 Мафия определилась с общей целью.",
                     )
             if target is not None:
-                status_text = f"🤵 Ночной выбор принят: вы нацелились на {player_display_name(target)}."
+                selected_name = player_display_name(target)
+                selected_user_id = target.user_id
             else:
-                status_text = "🤵 Ночной выбор мафии принят."
-            await refresh_private_action_message(callback, room, callback.from_user.id, status_text)
+                selected_name = "цель"
+                selected_user_id = None
+            await callback.message.edit_text(
+                locked_choice_text(room, callback.from_user.id, selected_name, selected_user_id),
+            )
             await maybe_finish_phase_early(callback.bot, room)
             persist_room(room)
         return
 
     if action == "heal":
+        if room.doctor_target_id is not None:
+            await callback.answer("Выбор уже зафиксирован до конца ночи.", show_alert=True)
+            return
         ok, info = room.set_doctor_target(callback.from_user.id, target_id)
         await callback.answer(info, show_alert=not ok)
         if ok:
             target = room.get_player(target_id)
             await announce_night_role_once(actor.role)
             if target is not None:
-                status_text = f"👨🏼‍⚕️ Выбор принят: вы пошли лечить {player_display_name(target)}."
+                selected_name = player_display_name(target)
+                selected_user_id = target.user_id
             else:
-                status_text = "👨🏼‍⚕️ Выбор доктора принят."
-            await refresh_private_action_message(callback, room, callback.from_user.id, status_text)
+                selected_name = "цель"
+                selected_user_id = None
+            await callback.message.edit_text(
+                locked_choice_text(room, callback.from_user.id, selected_name, selected_user_id),
+            )
             await maybe_finish_phase_early(callback.bot, room)
             persist_room(room)
         return
 
     if action == "check":
+        if room.commissar_target_id is not None:
+            await callback.answer("Выбор уже зафиксирован до конца ночи.", show_alert=True)
+            return
         ok, info = room.check_player_role(callback.from_user.id, target_id)
         await callback.answer("Проверка принята." if ok else info, show_alert=not ok)
         if ok:
             target = room.get_player(target_id)
             await announce_night_role_once(actor.role)
             if target is not None:
-                status_text = f"🕵️ Проверка принята: вы пошли проверять {player_display_name(target)}. Результат будет утром."
+                selected_name = player_display_name(target)
+                selected_user_id = target.user_id
             else:
-                status_text = "🕵️ Проверка принята. Результат будет утром."
-            await refresh_private_action_message(callback, room, callback.from_user.id, status_text)
+                selected_name = "цель"
+                selected_user_id = None
+            await callback.message.edit_text(
+                locked_choice_text(room, callback.from_user.id, selected_name, selected_user_id),
+            )
+            await maybe_finish_phase_early(callback.bot, room)
+            persist_room(room)
+        return
+
+    if action == "advocate":
+        if room.advocate_target_id is not None:
+            await callback.answer("Выбор уже зафиксирован до конца ночи.", show_alert=True)
+            return
+        ok, info = room.set_advocate_target(callback.from_user.id, target_id)
+        await callback.answer(info, show_alert=not ok)
+        if ok:
+            target = room.get_player(target_id)
+            await announce_night_role_once(actor.role)
+            if target is not None:
+                selected_name = player_display_name(target)
+                selected_user_id = target.user_id
+            else:
+                selected_name = "цель"
+                selected_user_id = None
+            await callback.message.edit_text(
+                locked_choice_text(room, callback.from_user.id, selected_name, selected_user_id),
+            )
             await maybe_finish_phase_early(callback.bot, room)
             persist_room(room)
         return
@@ -2247,46 +2463,88 @@ async def on_action_callback(callback: CallbackQuery) -> None:
         return
 
     if action == "maniac":
+        if room.maniac_target_id is not None:
+            await callback.answer("Выбор уже зафиксирован до конца ночи.", show_alert=True)
+            return
         ok, info = room.set_maniac_target(callback.from_user.id, target_id)
         await callback.answer(info, show_alert=not ok)
         if ok:
             target = room.get_player(target_id)
             await announce_night_role_once(actor.role)
             if target is not None:
-                status_text = f"🔪 Выбор принят: вы пошли к {player_display_name(target)}."
+                selected_name = player_display_name(target)
+                selected_user_id = target.user_id
             else:
-                status_text = "🔪 Маньяк выбрал цель."
-            await refresh_private_action_message(callback, room, callback.from_user.id, status_text)
+                selected_name = "цель"
+                selected_user_id = None
+            await callback.message.edit_text(
+                locked_choice_text(room, callback.from_user.id, selected_name, selected_user_id),
+            )
             await maybe_finish_phase_early(callback.bot, room)
             persist_room(room)
         return
 
     if action == "mistress":
+        if room.mistress_target_id is not None:
+            await callback.answer("Выбор уже зафиксирован до конца ночи.", show_alert=True)
+            return
         ok, info = room.set_mistress_target(callback.from_user.id, target_id)
         await callback.answer(info, show_alert=not ok)
         if ok:
             target = room.get_player(target_id)
             await announce_night_role_once(actor.role)
             if target is not None:
-                status_text = f"💃 Ход принят: вы пошли к {player_display_name(target)}."
+                selected_name = player_display_name(target)
+                selected_user_id = target.user_id
             else:
-                status_text = "💃 Любовница сделала ход."
-            await refresh_private_action_message(callback, room, callback.from_user.id, status_text)
+                selected_name = "цель"
+                selected_user_id = None
+            await callback.message.edit_text(
+                locked_choice_text(room, callback.from_user.id, selected_name, selected_user_id),
+            )
             await maybe_finish_phase_early(callback.bot, room)
             persist_room(room)
         return
 
     if action == "bum":
+        if room.bum_target_id is not None:
+            await callback.answer("Выбор уже зафиксирован до конца ночи.", show_alert=True)
+            return
         ok, info = room.set_bum_target(callback.from_user.id, target_id)
         await callback.answer(info, show_alert=not ok)
         if ok:
             target = room.get_player(target_id)
             await announce_night_role_once(actor.role)
             if target is not None:
-                status_text = f"🧥 Наблюдение начато: вы пошли к {player_display_name(target)}."
+                selected_name = player_display_name(target)
+                selected_user_id = target.user_id
             else:
-                status_text = "🧥 Бомж отправился наблюдать."
-            await refresh_private_action_message(callback, room, callback.from_user.id, status_text)
+                selected_name = "цель"
+                selected_user_id = None
+            await callback.message.edit_text(
+                locked_choice_text(room, callback.from_user.id, selected_name, selected_user_id),
+            )
+            await maybe_finish_phase_early(callback.bot, room)
+            persist_room(room)
+        return
+
+    if action == "kamikaze":
+        if room.kamikaze_target_id is not None:
+            await callback.answer("Выбор уже зафиксирован до конца ночи.", show_alert=True)
+            return
+        ok, info = room.set_kamikaze_target(callback.from_user.id, target_id)
+        await callback.answer(info, show_alert=not ok)
+        if ok:
+            target = room.get_player(target_id)
+            if target is not None:
+                selected_name = player_display_name(target)
+                selected_user_id = target.user_id
+            else:
+                selected_name = "цель"
+                selected_user_id = None
+            await callback.message.edit_text(
+                locked_choice_text(room, callback.from_user.id, selected_name, selected_user_id),
+            )
             await maybe_finish_phase_early(callback.bot, room)
             persist_room(room)
         return
@@ -2298,6 +2556,9 @@ async def on_action_callback(callback: CallbackQuery) -> None:
 async def on_noop_callback(callback: CallbackQuery) -> None:
     if callback.data == "noop:actionhint":
         await callback.answer("Открой ЛС бота: меню хода придет автоматически по фазе.", show_alert=True)
+        return
+    if callback.data == "noop:locked":
+        await callback.answer("Выбор уже зафиксирован.", show_alert=True)
         return
     await callback.answer("Этап уже закрыт. Вы пропустили ход.", show_alert=True)
 
@@ -2400,12 +2661,19 @@ async def on_private_text(message: Message) -> None:
     if room.phase != "night":
         return
 
-    if actor.role not in {ROLE_DON, ROLE_MAFIA}:
+    teammate_roles: set[str] | None = None
+    if actor.role in {ROLE_DON, ROLE_MAFIA}:
+        teammate_roles = {ROLE_DON, ROLE_MAFIA}
+    elif actor.role in {ROLE_COMMISSAR, ROLE_SERGEANT}:
+        teammate_roles = {ROLE_COMMISSAR, ROLE_SERGEANT}
+
+    if teammate_roles is None:
         return
 
-    relay_text = f"{actor.full_name}:\n{text}"
+    relay_author = player_display_name(actor)
+    relay_text = f"{relay_author}:\n{text}"
     for teammate in room.alive_players():
-        if teammate.role not in {ROLE_DON, ROLE_MAFIA}:
+        if teammate.role not in teammate_roles:
             continue
         if teammate.user_id == actor.user_id:
             continue

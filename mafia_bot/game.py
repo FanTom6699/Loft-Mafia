@@ -224,9 +224,13 @@ class GameRoom:
     day_silenced_user_id: int | None = None
     doctor_target_id: int | None = None
     commissar_target_id: int | None = None
+    advocate_target_id: int | None = None
     maniac_target_id: int | None = None
     mistress_target_id: int | None = None
+    mistress_last_target_id: int | None = None
     bum_target_id: int | None = None
+    kamikaze_pending_user_id: int | None = None
+    kamikaze_target_id: int | None = None
     night_reports: dict[int, list[str]] = field(default_factory=dict)
     pending_last_words: set[int] = field(default_factory=set)
     used_last_words: set[int] = field(default_factory=set)
@@ -304,9 +308,13 @@ class GameRoom:
         self.day_silenced_user_id = None
         self.doctor_target_id = None
         self.commissar_target_id = None
+        self.advocate_target_id = None
         self.maniac_target_id = None
         self.mistress_target_id = None
+        self.mistress_last_target_id = None
         self.bum_target_id = None
+        self.kamikaze_pending_user_id = None
+        self.kamikaze_target_id = None
         self.night_reports.clear()
         self.pending_last_words.clear()
         self.used_last_words.clear()
@@ -413,6 +421,20 @@ class GameRoom:
         self.last_don_successor_id = new_don.user_id
         return f"После {reason} новым Доном становится {new_don.full_name}.", new_don.user_id
 
+    def transfer_commissar_if_needed(self) -> tuple[str, int] | None:
+        alive_commissar = next((p for p in self.alive_players() if p.role == ROLE_COMMISSAR), None)
+        if alive_commissar is not None:
+            return None
+
+        candidates = [p for p in self.alive_players() if p.role == ROLE_SERGEANT]
+        if not candidates:
+            return None
+
+        # Keep succession deterministic: the smallest user_id among alive sergeants becomes commissar.
+        new_commissar = min(candidates, key=lambda p: p.user_id)
+        new_commissar.role = ROLE_COMMISSAR
+        return "👮🏼‍♂️ Сержант унаследовал роль 🕵️‍ Комиссар Каттани", new_commissar.user_id
+
     def alive_civilians(self) -> list[Player]:
         return [
             player
@@ -503,6 +525,10 @@ class GameRoom:
         if commissar_alive and self.commissar_target_id is None:
             return False
 
+        advocate_alive = any(p.alive and p.role == ROLE_ADVOCATE for p in self.players.values())
+        if advocate_alive and self.advocate_target_id is None:
+            return False
+
         maniac_alive = any(p.alive and p.role == ROLE_MANIAC for p in self.players.values())
         if maniac_alive and self.maniac_target_id is None:
             return False
@@ -513,6 +539,9 @@ class GameRoom:
 
         bum_alive = any(p.alive and p.role == ROLE_BUM for p in self.players.values())
         if bum_alive and self.bum_target_id is None:
+            return False
+
+        if self.kamikaze_pending_user_id is not None and self.kamikaze_target_id is None:
             return False
 
         return True
@@ -616,9 +645,12 @@ class GameRoom:
         self.day_silenced_user_id = None
         self.doctor_target_id = None
         self.commissar_target_id = None
+        self.advocate_target_id = None
         self.maniac_target_id = None
         self.mistress_target_id = None
         self.bum_target_id = None
+        self.kamikaze_pending_user_id = None
+        self.kamikaze_target_id = None
         self.phase_started_at = None
         self.phase_duration_seconds = None
 
@@ -636,16 +668,21 @@ class GameRoom:
         self.round_no += 1
         return True, "Сегодня решили никого не вешать. Наступает ночь."
 
-    def resolve_day_trial(self) -> tuple[bool, str, list[Player], str | None, int | None]:
+    def resolve_day_trial(self) -> tuple[bool, str, list[Player], str | None, int | None, str | None, int | None]:
         if self.phase != PHASE_DAY or self.day_stage != DAY_STAGE_TRIAL:
-            return False, "Сейчас не идет этап повешения.", [], None, None
+            return False, "Сейчас не идет этап повешения.", [], None, None, None, None
 
         eliminated: list[Player] = []
         don_transfer_note: str | None = None
         don_successor_id: int | None = None
+        commissar_transfer_note: str | None = None
+        commissar_successor_id: int | None = None
 
         candidate = self.get_player(self.trial_candidate_id) if self.trial_candidate_id is not None else None
         yes_count, no_count = self.trial_vote_counts()
+        kamikaze_needs_revenge = False
+        kamikaze_user_id: int | None = None
+
         if candidate is not None and candidate.alive and yes_count > no_count:
             candidate.alive = False
             eliminated.append(candidate)
@@ -654,28 +691,76 @@ class GameRoom:
                 self.suicide_winners.add(candidate.user_id)
 
             if candidate.role == ROLE_KAMIKAZE:
-                candidates = [p for p in self.alive_players() if p.user_id != candidate.user_id]
-                if candidates:
-                    extra = random.choice(candidates)
-                    extra.alive = False
-                    eliminated.append(extra)
+                kamikaze_needs_revenge = True
+                kamikaze_user_id = candidate.user_id
 
             if candidate.role == ROLE_DON:
                 don_transfer_result = self.transfer_don_if_needed("казни Дона на голосовании")
                 if don_transfer_result is not None:
                     don_transfer_note, don_successor_id = don_transfer_result
+            if candidate.role == ROLE_COMMISSAR:
+                commissar_transfer_result = self.transfer_commissar_if_needed()
+                if commissar_transfer_result is not None:
+                    commissar_transfer_note, commissar_successor_id = commissar_transfer_result
 
         self._reset_for_night_transition()
 
         winner = self.check_winner()
         if winner:
-            return True, f"Игра окончена. Победила команда: {winner}.", eliminated, don_transfer_note, don_successor_id
+            return (
+                True,
+                f"Игра окончена. Победила команда: {winner}.",
+                eliminated,
+                don_transfer_note,
+                don_successor_id,
+                commissar_transfer_note,
+                commissar_successor_id,
+            )
 
         self.phase = PHASE_NIGHT
         self.round_no += 1
+        if kamikaze_needs_revenge and kamikaze_user_id is not None:
+            self.kamikaze_pending_user_id = kamikaze_user_id
+            self.kamikaze_target_id = None
         if not eliminated:
-            return True, "Большинством голосов игрока оставили в живых. Наступает ночь.", [], don_transfer_note, don_successor_id
-        return True, "По итогам голосования игрок повешен. Наступает ночь.", eliminated, don_transfer_note, don_successor_id
+            return (
+                True,
+                "Большинством голосов игрока оставили в живых. Наступает ночь.",
+                [],
+                don_transfer_note,
+                don_successor_id,
+                commissar_transfer_note,
+                commissar_successor_id,
+            )
+        return (
+            True,
+            "По итогам голосования игрок повешен. Наступает ночь.",
+            eliminated,
+            don_transfer_note,
+            don_successor_id,
+            commissar_transfer_note,
+            commissar_successor_id,
+        )
+
+    def set_kamikaze_target(self, kamikaze_user_id: int, target_user_id: int) -> tuple[bool, str]:
+        if self.phase != PHASE_NIGHT:
+            return False, "Сейчас не ночь."
+        if self.kamikaze_pending_user_id != kamikaze_user_id:
+            return False, "Сейчас у тебя нет доступного выбора камикадзе."
+
+        kamikaze = self.get_player(kamikaze_user_id)
+        target = self.get_player(target_user_id)
+        if kamikaze is None or target is None:
+            return False, "Игрок не найден."
+        if kamikaze.role != ROLE_KAMIKAZE:
+            return False, "Это действие доступно только камикадзе."
+        if target.user_id == kamikaze.user_id:
+            return False, "Нельзя выбрать себя."
+        if not target.alive:
+            return False, "Цель уже выбыла."
+
+        self.kamikaze_target_id = target_user_id
+        return True, "Камикадзе выбрал цель."
 
     def set_maniac_target(self, maniac_user_id: int, target_user_id: int) -> tuple[bool, str]:
         if self.phase != PHASE_NIGHT:
@@ -713,6 +798,8 @@ class GameRoom:
             return False, "Цель уже выбыла."
         if target.user_id == mistress.user_id:
             return False, "Нельзя выбрать себя."
+        if self.mistress_last_target_id is not None and target.user_id == self.mistress_last_target_id:
+            return False, "Нельзя ходить к одному и тому же игроку две ночи подряд."
 
         self.mistress_target_id = target_user_id
         return True, "Любовница отвлекла цель на эту ночь."
@@ -758,9 +845,27 @@ class GameRoom:
         self.commissar_target_id = target_user_id
         return True, "Проверка принята. Результат будет утром."
 
-    def resolve_night(self) -> tuple[bool, str, list[Player], str | None, int | None]:
+    def set_advocate_target(self, advocate_user_id: int, target_user_id: int) -> tuple[bool, str]:
         if self.phase != PHASE_NIGHT:
-            return False, "Сейчас не ночь.", [], None, None
+            return False, "Сейчас не ночь."
+
+        advocate = self.get_player(advocate_user_id)
+        target = self.get_player(target_user_id)
+        if advocate is None or target is None:
+            return False, "Игрок не найден."
+        if not advocate.alive:
+            return False, "Ты выбыл из игры."
+        if advocate.role != ROLE_ADVOCATE:
+            return False, "Это действие доступно только адвокату."
+        if not target.alive:
+            return False, "Цель уже выбыла."
+
+        self.advocate_target_id = target_user_id
+        return True, "Адвокат выбрал цель для защиты."
+
+    def resolve_night(self) -> tuple[bool, str, list[Player], str | None, int | None, str | None, int | None]:
+        if self.phase != PHASE_NIGHT:
+            return False, "Сейчас не ночь.", [], None, None, None, None
 
         self.night_reports.clear()
         self.last_doctor_saved_target_id = None
@@ -781,12 +886,20 @@ class GameRoom:
         if mistress_target_id is not None:
             blocked_target = self.get_player(mistress_target_id)
             if blocked_target is not None and blocked_target.alive:
-                self.add_night_report_line(blocked_target.user_id, "Ночью к тебе приходила 💃 Любовница.")
+                self.add_night_report_line(
+                    blocked_target.user_id,
+                    "\"Ты со мною забудь обо всём...\", - пела 💃🏼 Любовница",
+                )
+                self.add_night_report_line(
+                    blocked_target.user_id,
+                    "Пока все голосуют - ты лечишься. 💃🏼 Любовница постаралась...",
+                )
 
         if doctor_target_id is not None:
             healed_target = self.get_player(doctor_target_id)
             if healed_target is not None and healed_target.alive:
-                self.add_night_report_line(healed_target.user_id, "Ночью к тебе приходил 👨🏼‍⚕️ Доктор.")
+                # Add this line later so it stays the final line for the healed player.
+                pass
 
         mafia_votes = self._active_mafia_votes()
         mafia_target_id = self._choose_mafia_target(mafia_votes)
@@ -799,15 +912,35 @@ class GameRoom:
                 maniac_target_id = target.user_id
 
         commissar = next((p for p in self.alive_players() if p.role == ROLE_COMMISSAR), None)
+        advocate = next((p for p in self.alive_players() if p.role == ROLE_ADVOCATE), None)
+        advocate_target_id: int | None = None
+        if advocate is not None and self.advocate_target_id is not None:
+            protected_target = self.get_player(self.advocate_target_id)
+            if protected_target is not None and protected_target.alive:
+                advocate_target_id = protected_target.user_id
+
         if commissar is not None and self.commissar_target_id is not None:
             checked = self.get_player(self.commissar_target_id)
             if checked is not None and checked.alive:
                 self.add_night_report_line(checked.user_id, "Ночью тебя проверял 🕵️ Комиссар Каттани.")
-                # Явный вывод роли для комиссара
-                self.add_night_report_line(
-                    commissar.user_id,
-                    self.commissar_check_result_text(checked),
-                )
+                mafia_checked = checked.role in MAFIA_ROLES
+                masked_by_advocate = mafia_checked and advocate_target_id == checked.user_id
+                if masked_by_advocate:
+                    self.add_night_report_line(
+                        checked.user_id,
+                        "Кто-то сильно заинтересовался твоей ролью...\n"
+                        "Но 👨🏼‍💼 Адвокат сказал, что ты 👨🏼 Мирный житель!",
+                    )
+                    self.add_night_report_line(
+                        commissar.user_id,
+                        f"🕵️ Результат проверки: {checked.full_name} - 👨🏼 <b>{ROLE_CITIZEN}</b>",
+                    )
+                else:
+                    # Явный вывод роли для комиссара
+                    self.add_night_report_line(
+                        commissar.user_id,
+                        self.commissar_check_result_text(checked),
+                    )
 
         attacks: dict[int, list[str]] = {}
         if mafia_target_id is not None:
@@ -832,12 +965,25 @@ class GameRoom:
             eliminated.append(target)
             self.night_kill_sources[target.user_id] = attacks[target_id]
 
+        if self.kamikaze_pending_user_id is not None and self.kamikaze_target_id is not None:
+            revenge_target = self.get_player(self.kamikaze_target_id)
+            if revenge_target is not None and revenge_target.alive:
+                revenge_target.alive = False
+                eliminated.append(revenge_target)
+                self.night_kill_sources.setdefault(revenge_target.user_id, []).append("камикадзе")
+
         don_transfer_note: str | None = None
         don_successor_id: int | None = None
+        commissar_transfer_note: str | None = None
+        commissar_successor_id: int | None = None
         if any(player.role == ROLE_DON for player in eliminated):
             don_transfer_result = self.transfer_don_if_needed("убийства Дона ночью")
             if don_transfer_result is not None:
                 don_transfer_note, don_successor_id = don_transfer_result
+        if any(player.role == ROLE_COMMISSAR for player in eliminated):
+            commissar_transfer_result = self.transfer_commissar_if_needed()
+            if commissar_transfer_result is not None:
+                commissar_transfer_note, commissar_successor_id = commissar_transfer_result
 
         # Mistress no longer blocks night actions. She only sets day silence if she survived the night.
         if mistress is not None and mistress.alive and mistress_target_id is not None:
@@ -851,18 +997,54 @@ class GameRoom:
             if observed is not None:
                 if observed.alive:
                     self.add_night_report_line(observed.user_id, "Ночью рядом с тобой крутился 🧥 Бомж.")
-                notes: list[str] = []
-                if observed.user_id == mafia_target_id:
-                    notes.append("У дома цели крутились подозрительные люди.")
-                if observed.user_id == maniac_target_id:
-                    notes.append("Рядом заметили одинокую фигуру с ножом.")
-                if observed.user_id == doctor_target_id:
-                    notes.append("К цели заходил ночной медик.")
-                if not notes:
-                    notes.append("Ночь прошла тихо, явных событий у цели не было.")
-                self.add_night_report_line(bum.user_id, f"Наблюдение за {observed.full_name}:")
-                for note in notes:
-                    self.add_night_report_line(bum.user_id, note)
+                visitors: list[Player] = []
+                seen_ids: set[int] = set()
+
+                def add_visitor(visitor_user_id: int | None) -> None:
+                    if visitor_user_id is None:
+                        return
+                    if visitor_user_id == bum.user_id:
+                        return
+                    if visitor_user_id in seen_ids:
+                        return
+                    visitor = self.get_player(visitor_user_id)
+                    if visitor is None:
+                        return
+                    seen_ids.add(visitor_user_id)
+                    visitors.append(visitor)
+
+                if doctor_target_id == observed.user_id and doctor is not None:
+                    add_visitor(doctor.user_id)
+                if self.commissar_target_id == observed.user_id and commissar is not None:
+                    add_visitor(commissar.user_id)
+                if maniac_target_id == observed.user_id and maniac is not None:
+                    add_visitor(maniac.user_id)
+                if mistress_target_id == observed.user_id and mistress is not None:
+                    add_visitor(mistress.user_id)
+                if advocate_target_id == observed.user_id and advocate is not None:
+                    add_visitor(advocate.user_id)
+
+                for mafia_user_id, voted_target_id in mafia_votes.items():
+                    if voted_target_id == observed.user_id:
+                        add_visitor(mafia_user_id)
+
+                if visitors:
+                    visitor_names = ", ".join(player.full_name for player in visitors)
+                    self.add_night_report_line(
+                        bum.user_id,
+                        f"Ночью ты пришёл за бутылкой к {observed.full_name} и увидел там {visitor_names}",
+                    )
+                else:
+                    self.add_night_report_line(
+                        bum.user_id,
+                        f"Ты выпросил у {observed.full_name} бутылку и ушёл обратно на улицу. Ничего подозрительного не произошло.",
+                    )
+
+        # Keep doctor's confirmation as the last line in personal report.
+        if doctor_target_id is not None:
+            healed_target = self.get_player(doctor_target_id)
+            if healed_target is not None and healed_target.alive:
+                self.add_night_report_line(healed_target.user_id, "👨🏼‍⚕️ Доктор вылечил тебя")
 
         self.night_votes.clear()
         self.mafia_vote_locked = False
@@ -874,18 +1056,46 @@ class GameRoom:
         self.trial_votes.clear()
         self.doctor_target_id = None
         self.commissar_target_id = None
+        self.advocate_target_id = None
         self.maniac_target_id = None
+        self.mistress_last_target_id = mistress_target_id
         self.mistress_target_id = None
         self.bum_target_id = None
+        self.kamikaze_pending_user_id = None
+        self.kamikaze_target_id = None
 
         winner = self.check_winner()
         if winner:
-            return True, f"Игра окончена. Победила команда: {winner}.", eliminated, don_transfer_note, don_successor_id
+            return (
+                True,
+                f"Игра окончена. Победила команда: {winner}.",
+                eliminated,
+                don_transfer_note,
+                don_successor_id,
+                commissar_transfer_note,
+                commissar_successor_id,
+            )
 
         self.phase = PHASE_DAY
         if not eliminated:
-            return True, "Удивительно, но этой ночью все выжили.", [], don_transfer_note, don_successor_id
-        return True, "Ночь окончена. Наступает день.", eliminated, don_transfer_note, don_successor_id
+            return (
+                True,
+                "Удивительно, но этой ночью все выжили.",
+                [],
+                don_transfer_note,
+                don_successor_id,
+                commissar_transfer_note,
+                commissar_successor_id,
+            )
+        return (
+            True,
+            "Ночь окончена. Наступает день.",
+            eliminated,
+            don_transfer_note,
+            don_successor_id,
+            commissar_transfer_note,
+            commissar_successor_id,
+        )
 
     def pop_night_reports(self) -> dict[int, list[str]]:
         reports = self.night_reports.copy()
@@ -991,9 +1201,12 @@ class GameRoom:
         self.announced_night_roles.clear()
         self.doctor_target_id = None
         self.commissar_target_id = None
+        self.advocate_target_id = None
         self.maniac_target_id = None
         self.mistress_target_id = None
         self.bum_target_id = None
+        self.kamikaze_pending_user_id = None
+        self.kamikaze_target_id = None
 
         winner = self.check_winner()
         if winner:

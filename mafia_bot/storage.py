@@ -104,9 +104,13 @@ class GameStateRepository:
             "day_silenced_user_id": room.day_silenced_user_id,
             "doctor_target_id": room.doctor_target_id,
             "commissar_target_id": room.commissar_target_id,
+            "advocate_target_id": room.advocate_target_id,
             "maniac_target_id": room.maniac_target_id,
             "mistress_target_id": room.mistress_target_id,
+            "mistress_last_target_id": room.mistress_last_target_id,
             "bum_target_id": room.bum_target_id,
+            "kamikaze_pending_user_id": room.kamikaze_pending_user_id,
+            "kamikaze_target_id": room.kamikaze_target_id,
             "night_reports": room.night_reports,
             "pending_last_words": sorted(room.pending_last_words),
             "used_last_words": sorted(room.used_last_words),
@@ -165,9 +169,13 @@ class GameStateRepository:
 
         room.doctor_target_id = payload.get("doctor_target_id")
         room.commissar_target_id = payload.get("commissar_target_id")
+        room.advocate_target_id = payload.get("advocate_target_id")
         room.maniac_target_id = payload.get("maniac_target_id")
         room.mistress_target_id = payload.get("mistress_target_id")
+        room.mistress_last_target_id = payload.get("mistress_last_target_id")
         room.bum_target_id = payload.get("bum_target_id")
+        room.kamikaze_pending_user_id = payload.get("kamikaze_pending_user_id")
+        room.kamikaze_target_id = payload.get("kamikaze_target_id")
 
         room.night_reports = {
             int(k): [str(line) for line in lines]
