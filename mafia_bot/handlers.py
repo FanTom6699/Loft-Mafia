@@ -276,6 +276,8 @@ def format_killer_sources_text(sources: list[str]) -> str:
             labels.append(role_mark_text(ROLE_DON))
         elif source == "маньяк":
             labels.append(role_mark_text(ROLE_MANIAC))
+        elif source == "камикадзе":
+            labels.append(role_mark_text(ROLE_KAMIKAZE))
         else:
             labels.append(source)
 
@@ -933,6 +935,8 @@ def build_action_keyboard(room, actor_user_id: int) -> InlineKeyboardMarkup | No
                 )
         if actor.role == "Доктор":
             for target in room.alive_players():
+                if room.doctor_self_heal_used and target.user_id == actor_user_id:
+                    continue
                 rows.append(
                     [
                         InlineKeyboardButton(

@@ -223,6 +223,7 @@ class GameRoom:
     night_kill_sources: dict[int, list[str]] = field(default_factory=dict)
     day_silenced_user_id: int | None = None
     doctor_target_id: int | None = None
+    doctor_self_heal_used: bool = False
     commissar_target_id: int | None = None
     advocate_target_id: int | None = None
     maniac_target_id: int | None = None
@@ -264,6 +265,7 @@ class GameRoom:
         self.finished_at = None
         self.suicide_winners.clear()
         self.last_don_successor_id = None
+        self.doctor_self_heal_used = False
         self.pending_last_words.clear()
         self.used_last_words.clear()
         self.last_words_log.clear()
@@ -307,6 +309,7 @@ class GameRoom:
         self.night_kill_sources.clear()
         self.day_silenced_user_id = None
         self.doctor_target_id = None
+        self.doctor_self_heal_used = False
         self.commissar_target_id = None
         self.advocate_target_id = None
         self.maniac_target_id = None
@@ -454,6 +457,16 @@ class GameRoom:
             self.finished_at = datetime.now()
             return "Маньяк"
 
+        # Special neutral-win case requested by game rules:
+        # if only maniac and one ordinary citizen remain, maniac wins immediately.
+        if maniac_count == 1 and len(alive) == 2:
+            non_maniac = next((p for p in alive if p.role != ROLE_MANIAC), None)
+            if non_maniac is not None and non_maniac.role == ROLE_CITIZEN:
+                self.phase = PHASE_FINISHED
+                self.winner_team = "Маньяк"
+                self.finished_at = datetime.now()
+                return "Маньяк"
+
         if mafia_count == 0 and maniac_count == 0:
             self.phase = PHASE_FINISHED
             self.winner_team = "Мирные жители"
@@ -506,6 +519,8 @@ class GameRoom:
             return False, "Лечить может только доктор."
         if not target.alive:
             return False, "Цель уже выбыла."
+        if target.user_id == doctor.user_id and self.doctor_self_heal_used:
+            return False, "Ты уже лечил себя в этой игре."
 
         self.doctor_target_id = target_user_id
         return True, "Доктор принял вызов."
@@ -878,10 +893,17 @@ class GameRoom:
 
         doctor = next((p for p in self.alive_players() if p.role == ROLE_DOCTOR), None)
         doctor_target_id: int | None = None
-        if doctor is not None and self.doctor_target_id is not None:
+        doctor_blocked_by_mistress = (
+            doctor is not None
+            and mistress_target_id is not None
+            and doctor.user_id == mistress_target_id
+        )
+        if doctor is not None and self.doctor_target_id is not None and not doctor_blocked_by_mistress:
             target = self.get_player(self.doctor_target_id)
             if target is not None and target.alive:
                 doctor_target_id = target.user_id
+                if target.user_id == doctor.user_id:
+                    self.doctor_self_heal_used = True
 
         if mistress_target_id is not None:
             blocked_target = self.get_player(mistress_target_id)
@@ -947,6 +969,8 @@ class GameRoom:
             attacks.setdefault(mafia_target_id, []).append("мафия")
         if maniac_target_id is not None:
             attacks.setdefault(maniac_target_id, []).append("маньяк")
+        if self.kamikaze_pending_user_id is not None and self.kamikaze_target_id is not None:
+            attacks.setdefault(self.kamikaze_target_id, []).append("камикадзе")
 
         eliminated: list[Player] = []
         self.night_kill_sources.clear()
@@ -958,19 +982,14 @@ class GameRoom:
             if doctor_target_id == target.user_id:
                 self.last_doctor_saved_target_id = target.user_id
                 continue
-            if target.role == ROLE_LUCKY and random.random() < 0.5:
+            source_count = len(attacks[target_id])
+            if target.role == ROLE_LUCKY and source_count == 1 and random.random() < 0.5:
+                self.add_night_report_line(target.user_id, "Тебя попытались убить, но тебе повезло!")
                 continue
 
             target.alive = False
             eliminated.append(target)
             self.night_kill_sources[target.user_id] = attacks[target_id]
-
-        if self.kamikaze_pending_user_id is not None and self.kamikaze_target_id is not None:
-            revenge_target = self.get_player(self.kamikaze_target_id)
-            if revenge_target is not None and revenge_target.alive:
-                revenge_target.alive = False
-                eliminated.append(revenge_target)
-                self.night_kill_sources.setdefault(revenge_target.user_id, []).append("камикадзе")
 
         don_transfer_note: str | None = None
         don_successor_id: int | None = None
@@ -1044,7 +1063,18 @@ class GameRoom:
         if doctor_target_id is not None:
             healed_target = self.get_player(doctor_target_id)
             if healed_target is not None and healed_target.alive:
-                self.add_night_report_line(healed_target.user_id, "👨🏼‍⚕️ Доктор вылечил тебя")
+                doctor_self_heal_without_attack = (
+                    doctor is not None
+                    and healed_target.user_id == doctor.user_id
+                    and healed_target.user_id not in attacks
+                )
+                if doctor_self_heal_without_attack:
+                    self.add_night_report_line(
+                        healed_target.user_id,
+                        "Бинты, скальпель и ножницы не пригодились... И хорошо!",
+                    )
+                else:
+                    self.add_night_report_line(healed_target.user_id, "👨🏼‍⚕️ Доктор вылечил тебя")
 
         self.night_votes.clear()
         self.mafia_vote_locked = False
