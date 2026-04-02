@@ -326,6 +326,8 @@ async def start_registration_timer(room, bot: Bot, seconds: int) -> None:
             await process_registration_timeout(bot, room.chat_id)
         except asyncio.CancelledError:
             return
+        except Exception as e:
+            print(f"[ERROR] registration_timer_worker: chat_id={room.chat_id}, error={e!r}")
 
     registration_timers[room.chat_id] = asyncio.create_task(worker())
 
@@ -1075,7 +1077,7 @@ def build_action_prompt_text(room, actor_user_id: int) -> str:
         return "Сейчас у твоей роли нет активных ночных действий."
 
     if room.phase == "day" and room.day_stage == DAY_STAGE_NOMINATION:
-        return "🏙 День. Выбери кандидата на повешение или пропусти голосование:"
+        return "Пришло время искать виноватых!\nКого ты хочешь линчевать?"
 
     return "Выбери действие на текущую фазу:"
 
@@ -1571,7 +1573,7 @@ async def phase_timer_worker(bot: Bot, chat_id: int, phase: str, duration_sec: i
         if phase == "night":
             await process_night_end(bot, chat_id, timer_reason="⏱ Время ночи вышло. Фаза закрыта автоматически.")
         elif phase == "day":
-            await process_day_end(bot, chat_id, timer_reason="⏱ Время дня вышло. Фаза закрыта автоматически.")
+            await process_day_end(bot, chat_id, timer_reason=None)
     except asyncio.CancelledError:
         return
     except Exception as e:
@@ -1616,6 +1618,14 @@ async def start_phase_timer(
 
 async def restore_runtime_state(bot: Bot) -> None:
     for room in storage.rooms.values():
+        if not room.started and room.registration_open:
+            remaining = registration_remaining_seconds(room)
+            if remaining <= 0:
+                await process_registration_timeout(bot, room.chat_id)
+            else:
+                await start_registration_timer(room, bot, remaining)
+            continue
+
         if not room.started or room.phase in {PHASE_FINISHED, "lobby"}:
             continue
         if room.phase == PHASE_DAY and room.day_stage is None:
@@ -1670,7 +1680,7 @@ async def maybe_finish_phase_early(bot: Bot, room) -> None:
         return
 
     if room.phase == "day" and room.day_stage == DAY_STAGE_NOMINATION and room.all_alive_day_voted():
-        await process_day_end(bot, room.chat_id, timer_reason="⚡ Все игроки проголосовали на этапе номинации. Подводим итоги.")
+        await process_day_end(bot, room.chat_id, timer_reason=None)
         return
 
     if room.phase == "day" and room.day_stage == DAY_STAGE_TRIAL and room.all_alive_trial_voted():
@@ -2424,15 +2434,32 @@ async def on_action_callback(callback: CallbackQuery) -> None:
         return
 
     if action == "vote":
+        if callback.from_user.id in room.day_votes:
+            await callback.answer("Выбор уже зафиксирован до конца голосования.", show_alert=True)
+            return
+
         ok, info = room.set_day_vote(callback.from_user.id, target_id)
         await callback.answer(info, show_alert=not ok)
         if ok:
             target = room.get_player(target_id)
+            voter = room.get_player(callback.from_user.id)
             if target is not None:
-                status_text = f"🗳 Голос принят: вы выдвинули {player_display_name(target)}."
+                selected_name = player_display_name(target)
+                selected_user_id = target.user_id
             else:
-                status_text = "🗳 Твой голос принят."
-            await refresh_private_action_message(callback, room, callback.from_user.id, status_text)
+                selected_name = "кандидата"
+                selected_user_id = None
+
+            await callback.message.edit_text(
+                locked_choice_text(room, callback.from_user.id, selected_name, selected_user_id),
+                reply_markup=locked_choice_keyboard(selected_name),
+            )
+
+            if voter is not None and target is not None:
+                await callback.bot.send_message(
+                    room.chat_id,
+                    f"{player_display_name(voter)} проголосовал за {player_display_name(target)}",
+                )
             await maybe_finish_phase_early(callback.bot, room)
             persist_room(room)
         return
@@ -2442,6 +2469,10 @@ async def on_action_callback(callback: CallbackQuery) -> None:
             await callback.answer("Сейчас не этап выбора кандидата.", show_alert=True)
             return
 
+        if callback.from_user.id in room.day_votes:
+            await callback.answer("Выбор уже зафиксирован до конца голосования.", show_alert=True)
+            return
+
         voter = room.get_player(callback.from_user.id)
         if voter is None or not voter.alive:
             await callback.answer("Ты не можешь голосовать на этом этапе.", show_alert=True)
@@ -2449,11 +2480,9 @@ async def on_action_callback(callback: CallbackQuery) -> None:
 
         room.day_votes[callback.from_user.id] = 0
         await callback.answer("Пропуск голосования принят.")
-        await refresh_private_action_message(
-            callback,
-            room,
-            callback.from_user.id,
-            "🗳 Вы пропустили голосование на этапе выбора кандидата.",
+        await callback.message.edit_text(
+            build_action_prompt_text(room, callback.from_user.id) + "\n\nТы выбрал пропуск",
+            reply_markup=locked_choice_keyboard("пропуск"),
         )
         await callback.bot.send_message(
             room.chat_id,
