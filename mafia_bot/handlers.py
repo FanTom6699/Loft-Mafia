@@ -336,7 +336,7 @@ async def launch_game_from_registration(bot: Bot, room, chat_id: int, chat_title
         room.assign_roles()
     except Exception as e:
         try:
-            await bot.send_message(chat_id, f"Не удалось начать игру. Ошибка: {e!r}\nПопробуй /close и создай лобби заново.")
+            await bot.send_message(chat_id, f"Не удалось начать игру. Ошибка: {e!r}\nПопробуй /stop и создай лобби заново.")
         except Exception as e2:
             print(f"[ERROR] Не удалось отправить сообщение об ошибке: {e2!r}")
         print(f"[ERROR] assign_roles: {e!r}")
@@ -1720,7 +1720,7 @@ def role_card_for_player(room, player, chat_title: str) -> str:
     return card_text
 
 
-@router.message(CommandStart())
+@router.message(CommandStart(), F.chat.type == "private")
 async def cmd_start(message: Message, command: CommandObject) -> None:
     is_private_first_visit = False
     nickname = ""
@@ -1798,18 +1798,6 @@ async def cmd_start(message: Message, command: CommandObject) -> None:
         )
         return
 
-    text = (
-        "Привет. Это бот для игры в Мафию.\n\n"
-        "Команды:\n"
-        "/create - создать лобби\n"
-        "/extend - продлить регистрацию\n"
-        "/begin - начать игру вручную\n"
-        "/close - отменить регистрацию/игру\n\n"
-        "Вход в лобби: только через inline-кнопку Зарегистрироваться."
-    )
-    await message.answer(text)
-
-
 @router.message(Command("roles"))
 async def cmd_roles(message: Message) -> None:
     if message.chat.type == "private":
@@ -1855,7 +1843,7 @@ async def cmd_panel(message: Message) -> None:
     await message.answer("Панель регистрации:", reply_markup=registration_panel())
 
 
-@router.message(Command("create"))
+@router.message(Command("game"))
 async def cmd_create(message: Message) -> None:
     if message.chat.type == "private":
         await message.answer("Создавай лобби в групповом чате.")
@@ -1978,7 +1966,7 @@ async def cmd_extend(message: Message) -> None:
     await refresh_registration_post(message, room)
 
 
-@router.message(Command("begin"))
+@router.message(Command("start"))
 async def cmd_begin(message: Message) -> None:
     room = storage.get_room(message.chat.id)
     if room is None:
@@ -2742,12 +2730,19 @@ async def enforce_group_game_rules(message: Message) -> None:
         return
 
 
-@router.message(Command("close"))
+@router.message(Command("stop"))
 async def cmd_close(message: Message) -> None:
     room = storage.get_room(message.chat.id)
     if room is None:
         await message.answer("Лобби не найдено.")
         return
+
+    if room.started:
+        closing_text = "Игра остановлена."
+    elif room.registration_open:
+        closing_text = "Регистрация отменена."
+    else:
+        closing_text = "Лобби закрыто."
 
     await clear_registration_post(message.bot, room)
     cancel_phase_timer(message.chat.id)
@@ -2756,4 +2751,4 @@ async def cmd_close(message: Message) -> None:
     clear_action_menu_messages(message.chat.id)
     remove_room_state(message.chat.id)
     storage.close_room(message.chat.id)
-    await message.answer("Лобби закрыто.")
+    await message.answer(closing_text)
