@@ -5,6 +5,7 @@ from datetime import datetime
 from html import escape
 
 from aiogram import F, Router
+from aiogram.exceptions import TelegramBadRequest
 from aiogram.filters import Command, CommandObject, CommandStart
 from aiogram.types import CallbackQuery, FSInputFile, InlineKeyboardButton, InlineKeyboardMarkup, Message, User
 from aiogram import Bot
@@ -2562,10 +2563,23 @@ async def on_noop_callback(callback: CallbackQuery) -> None:
 
 @router.callback_query(F.data.startswith("pmenu:"))
 async def on_private_menu_callback(callback: CallbackQuery) -> None:
+    async def safe_answer(text: str | None = None, show_alert: bool = False) -> None:
+        try:
+            if text is None:
+                await callback.answer()
+            else:
+                await callback.answer(text, show_alert=show_alert)
+        except TelegramBadRequest as e:
+            # Ignore stale callback query errors after long delays/restarts.
+            error_text = str(e)
+            if "query is too old" in error_text or "query ID is invalid" in error_text:
+                return
+            raise
+
     if callback.from_user is None:
         return
     if callback.message is None or callback.message.chat.type != "private":
-        await callback.answer("Это меню работает только в ЛС бота.", show_alert=True)
+        await safe_answer("Это меню работает только в ЛС бота.", show_alert=True)
         return
 
     action = callback.data.split(":", maxsplit=1)[1]
@@ -2585,26 +2599,26 @@ async def on_private_menu_callback(callback: CallbackQuery) -> None:
             ),
             private_main_menu_keyboard(),
         )
-        await callback.answer()
+        await safe_answer()
         return
 
     if action == "roles":
         await show_menu_screen("Выберите роль:", private_roles_keyboard())
-        await callback.answer()
+        await safe_answer()
         return
     if action.startswith("role:"):
         raw_idx = action.split(":", maxsplit=1)[1]
         try:
             idx = int(raw_idx)
         except ValueError:
-            await callback.answer("Некорректная роль.", show_alert=True)
+            await safe_answer("Некорректная роль.", show_alert=True)
             return
         if idx < 0 or idx >= len(PRIVATE_ROLE_ORDER):
-            await callback.answer("Роль не найдена.", show_alert=True)
+            await safe_answer("Роль не найдена.", show_alert=True)
             return
         role = PRIVATE_ROLE_ORDER[idx]
         await show_menu_screen(private_role_details_text(role), private_back_to_roles_keyboard())
-        await callback.answer()
+        await safe_answer()
         return
     if action == "stats":
         stats = repo.get_player_stats(callback.from_user.id)
@@ -2615,13 +2629,13 @@ async def on_private_menu_callback(callback: CallbackQuery) -> None:
             )
         else:
             await show_menu_screen(format_player_stats_text(stats), private_back_to_menu_keyboard())
-        await callback.answer()
+        await safe_answer()
         return
     if action == "profile":
         await show_menu_screen("Профиль отключен. Используй меню ролей и статистики.", private_back_to_menu_keyboard())
-        await callback.answer()
+        await safe_answer()
         return
-    await callback.answer("Неизвестный пункт меню.", show_alert=True)
+    await safe_answer("Неизвестный пункт меню.", show_alert=True)
 
 
 @router.message(F.chat.type == "private", F.text)
