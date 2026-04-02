@@ -654,6 +654,11 @@ def player_display_name(player) -> str:
     return f"Игрок {player.user_id}"
 
 
+def player_profile_link(player) -> str:
+    safe_name = escape(player_display_name(player))
+    return f"<a href=\"tg://user?id={player.user_id}\">{safe_name}</a>"
+
+
 async def registration_join_link(message: Message, chat_id: int) -> str:
     me = await message.bot.get_me()
     return f"https://t.me/{me.username}?start=join_{chat_id}"
@@ -1181,13 +1186,15 @@ async def push_kamikaze_revenge_menu(bot: Bot, room) -> None:
         )
 
 
-async def push_trial_vote_menus(bot: Bot, room, candidate_name: str) -> None:
+async def push_trial_vote_menus(bot: Bot, room, candidate) -> None:
+    candidate_name = player_display_name(candidate)
     print(f"[TRIAL] push_trial_vote_menus: candidate={candidate_name}, chat_id={room.chat_id}")
     yes_count, no_count = room.trial_vote_counts()
+    candidate_mark = player_profile_link(candidate)
     try:
         await bot.send_message(
             room.chat_id,
-            f"Вы точно хотите линчевать {candidate_name}?",
+            f"Вы точно хотите линчевать {candidate_mark}?",
             reply_markup=trial_vote_keyboard(room.chat_id, yes_count, no_count),
         )
     except Exception as e:
@@ -1304,8 +1311,8 @@ async def process_night_end(bot: Bot, chat_id: int, timer_reason: str | None = N
                 role_text = role_mark_text(dead.role)
                 sources = kill_sources.get(dead.user_id, [])
                 killer_text = format_killer_sources_text(sources)
-                safe_name = escape((dead.full_name or "").strip() or f"Игрок {dead.user_id}")
-                text = f"Сегодня был жестоко убит {role_text} {safe_name}"
+                dead_mark = player_profile_link(dead)
+                text = f"Сегодня был жестоко убит {role_text} {dead_mark}"
                 if killer_text:
                     text += f"\n{killer_text}"
                 await bot.send_message(chat_id, text)
@@ -1470,7 +1477,7 @@ async def process_day_end(bot: Bot, chat_id: int, timer_reason: str | None = Non
             room.start_day_trial(candidate.user_id)
             print(f"[PHASE] process_day_end: trial started for chat_id={chat_id}, candidate_id={candidate.user_id}, candidate_name={candidate.full_name}")
             persist_room(room)
-            await push_trial_vote_menus(bot, room, candidate.full_name)
+            await push_trial_vote_menus(bot, room, candidate)
             await start_phase_timer(room, bot)
             print(f"[PHASE] process_day_end: trial menus sent and timer started for chat_id={chat_id}")
             return
@@ -1495,11 +1502,12 @@ async def process_day_end(bot: Bot, chat_id: int, timer_reason: str | None = Non
             if eliminated:
                 first = eliminated[0]
                 role_text = role_mark_text(first.role)
+                first_mark = player_profile_link(first)
                 await bot.send_message(
                     chat_id,
-                    f"Результаты голосования:\n{yes_count} 👍 | {no_count} 👎\n\nВешаем {first.full_name}! :)",
+                    f"Результаты голосования:\n{yes_count} 👍 | {no_count} 👎\n\nВешаем {first_mark}! :)",
                 )
-                await bot.send_message(chat_id, f"{first.full_name} был {role_text}")
+                await bot.send_message(chat_id, f"{first_mark} был {role_text}")
                 try:
                     if first.role == ROLE_KAMIKAZE:
                         await bot.send_message(
@@ -1518,7 +1526,8 @@ async def process_day_end(bot: Bot, chat_id: int, timer_reason: str | None = Non
                 if first.role == "Камикадзе" and len(eliminated) > 1:
                     second = eliminated[1]
                     second_role = role_mark_text(second.role)
-                    await bot.send_message(chat_id, f"💣 Камикадзе забрал с собой {second.full_name} ({second_role}).")
+                    second_mark = player_profile_link(second)
+                    await bot.send_message(chat_id, f"💣 Камикадзе забрал с собой {second_mark} ({second_role}).")
             else:
                 await bot.send_message(
                     chat_id,
@@ -1682,7 +1691,7 @@ async def maybe_finish_phase_early(bot: Bot, room) -> None:
         return
 
     if room.phase == "day" and room.day_stage == DAY_STAGE_TRIAL and room.all_alive_trial_voted():
-        await process_day_end(bot, room.chat_id, timer_reason="⚡ Все дневные голоса получены. День завершается досрочно.")
+        await process_day_end(bot, room.chat_id, timer_reason=None)
 
 
 def mafia_allies_text(room) -> str:
@@ -1877,7 +1886,7 @@ async def cmd_create(message: Message) -> None:
             await message.answer(info)
             return
         room = storage.get_room(message.chat.id)
-    elif room.started:
+    elif room.started and room.phase != PHASE_FINISHED:
         await message.answer("Игра уже идет. Заверши текущую игру перед новой регистрацией.")
         return
 
@@ -2237,11 +2246,11 @@ async def on_trial_callback(callback: CallbackQuery) -> None:
     # Update shared group vote message after vote
     yes_count, no_count = room.trial_vote_counts()
     candidate = room.get_player(room.trial_candidate_id) if room.trial_candidate_id is not None else None
-    candidate_name = candidate.full_name if candidate is not None else "кандидат"
+    candidate_mark = player_profile_link(candidate) if candidate is not None else "кандидат"
     choice_text = "ЗА" if approve else "ПРОТИВ"
     try:
         await callback.message.edit_text(
-            f"Вы точно хотите линчевать {candidate_name}?",
+            f"Вы точно хотите линчевать {candidate_mark}?",
             reply_markup=trial_vote_keyboard(chat_id, yes_count, no_count),
         )
     except Exception:
@@ -2252,7 +2261,14 @@ async def on_trial_callback(callback: CallbackQuery) -> None:
 
     # If all have voted, proceed to next phase
     if room.all_alive_trial_voted():
-        await process_day_end(callback.bot, room.chat_id, timer_reason="⚡ Все дневные голоса получены. День завершается досрочно.")
+        try:
+            await callback.message.edit_text("Голосование завершено")
+        except Exception:
+            try:
+                await callback.message.edit_reply_markup(reply_markup=None)
+            except Exception:
+                pass
+        await process_day_end(callback.bot, room.chat_id, timer_reason=None)
     else:
         await maybe_finish_phase_early(callback.bot, room)
 
@@ -2688,11 +2704,14 @@ async def on_private_text(message: Message) -> None:
         persist_room(last_word_room)
 
         player = last_word_room.get_player(message.from_user.id)
-        player_name = player.full_name if player is not None else f"Игрок {message.from_user.id}"
+        raw_name = player.full_name if player is not None else f"Игрок {message.from_user.id}"
+        safe_name = escape((raw_name or "").strip() or f"Игрок {message.from_user.id}")
+        player_mark = f"<a href=\"tg://user?id={message.from_user.id}\">{safe_name}</a>"
+        safe_payload = escape(payload)
         await message.answer("Предсмертное сообщение принято.")
         await message.bot.send_message(
             last_word_room.chat_id,
-            f"🕯 Предсмертное слово {player_name}:\n{payload}",
+            f"Кто-то из жителей слышал, как {player_mark} кричал перед смертью:\n{safe_payload}",
         )
         return
 
