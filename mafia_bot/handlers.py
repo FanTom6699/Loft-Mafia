@@ -1291,7 +1291,11 @@ async def process_night_end(bot: Bot, chat_id: int, timer_reason: str | None = N
         kill_sources = room.pop_night_kill_sources()
         for user_id, lines in reports.items():
             try:
-                await bot.send_message(user_id, "\n".join(lines))
+                if len(lines) >= 3 and lines[0] == "Тебя убили :(" and lines[1] == "Ты можешь отправить сюда своё предсмертное сообщение" and lines[-1] in {"👨🏼‍⚕️ Доктор вылечил тебя", "Ты успешно вылечил себя!"}:
+                    await bot.send_message(user_id, "\n".join(lines[:-1]))
+                    await bot.send_message(user_id, lines[-1])
+                else:
+                    await bot.send_message(user_id, "\n".join(lines))
             except Exception:
                 continue
 
@@ -1304,8 +1308,6 @@ async def process_night_end(bot: Bot, chat_id: int, timer_reason: str | None = N
         if mafia_alive_tonight and mafia_target_tonight is None:
             await bot.send_message(chat_id, "🚷 🤵🏻 Дон сегодня не в настроении")
 
-        if room.last_doctor_saved_target_id is not None:
-            await bot.send_message(chat_id, "👨🏼‍⚕️ Доктор спас кого-то от смерти.")
         if eliminated:
             for dead in eliminated:
                 role_text = role_mark_text(dead.role)
@@ -1318,7 +1320,7 @@ async def process_night_end(bot: Bot, chat_id: int, timer_reason: str | None = N
                 await bot.send_message(chat_id, text)
             await prompt_last_words(bot, room, eliminated)
         else:
-            await bot.send_message(chat_id, "🌙 Этой ночью было тихо. Никто не погиб.")
+            await bot.send_message(chat_id, "🤷 Удивительно, но этой ночью все выжили")
 
         day_summary = (
             room.alive_players_text()
@@ -1995,10 +1997,18 @@ async def cmd_extend(message: Message) -> None:
     new_seconds = remaining + REGISTRATION_EXTENSION_SECONDS
     await start_registration_timer(room, message.bot, new_seconds)
     persist_room(room)
-    await message.answer(
+    sent = await message.answer(
         f"Регистрация продлена на {REGISTRATION_EXTENSION_SECONDS} сек. "
         f"Осталось {new_seconds} сек. Продлений: {room.registration_extensions}."
     )
+    try:
+        await message.delete()
+    except Exception:
+        pass
+    try:
+        await sent.delete()
+    except Exception:
+        pass
     await refresh_registration_post(message, room)
 
 
@@ -2261,8 +2271,9 @@ async def on_trial_callback(callback: CallbackQuery) -> None:
 
     # If all have voted, proceed to next phase
     if room.all_alive_trial_voted():
+        completion_text = f"Вы точно хотите линчевать {candidate_mark}?\n\nГолосование завершено"
         try:
-            await callback.message.edit_text("Голосование завершено")
+            await callback.message.edit_text(completion_text)
         except Exception:
             try:
                 await callback.message.edit_reply_markup(reply_markup=None)

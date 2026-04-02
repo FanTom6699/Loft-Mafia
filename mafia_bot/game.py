@@ -243,7 +243,27 @@ class GameRoom:
         self.finished_at = None
         self.suicide_winners.clear()
         self.last_don_successor_id = None
-        self.doctor_self_heal_used = False
+        self.started = False
+        self.round_no = 0
+        self.day_stage = None
+        self.night_votes.clear()
+        self.mafia_vote_locked = False
+        self.mafia_target_announced = False
+        self.announced_night_roles.clear()
+        self.day_votes.clear()
+        self.trial_candidate_id = None
+        self.trial_votes.clear()
+        self.night_kill_sources.clear()
+        self.day_silenced_user_id = None
+        self.doctor_target_id = None
+        self.commissar_target_id = None
+        self.advocate_target_id = None
+        self.maniac_target_id = None
+        self.mistress_target_id = None
+        self.bum_target_id = None
+        self.kamikaze_pending_user_id = None
+        self.kamikaze_target_id = None
+        self.night_reports.clear()
         self.pending_last_words.clear()
         self.used_last_words.clear()
         self.last_words_log.clear()
@@ -962,6 +982,8 @@ class GameRoom:
                 continue
 
             if doctor_target_id == target.user_id:
+                self.add_night_report_line(target.user_id, "Тебя убили :(")
+                self.add_night_report_line(target.user_id, "Ты можешь отправить сюда своё предсмертное сообщение")
                 self.last_doctor_saved_target_id = target.user_id
                 continue
             source_count = len(attacks[target_id])
@@ -1062,7 +1084,10 @@ class GameRoom:
                         "👨🏼‍⚕️ Доктор приходил к тебе в гости",
                     )
                 else:
-                    self.add_night_report_line(healed_target.user_id, "👨🏼‍⚕️ Доктор вылечил тебя")
+                    if doctor is not None and healed_target.user_id == doctor.user_id:
+                        self.add_night_report_line(healed_target.user_id, "Ты успешно вылечил себя!")
+                    else:
+                        self.add_night_report_line(healed_target.user_id, "👨🏼‍⚕️ Доктор вылечил тебя")
 
         self.night_votes.clear()
         self.mafia_vote_locked = False
