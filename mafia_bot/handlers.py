@@ -359,7 +359,7 @@ async def launch_game_from_registration(bot: Bot, room, chat_id: int, chat_title
         await bot.send_message(
             chat_id,
             "Игра начинается!\n\n"
-            "Сначала бот разошлет роли в личные сообщения, затем объявит начало ночи.",
+            "В течение нескольких секунд бот пришлёт вам личное сообщение с ролью и её описанием.",
         )
     except Exception as e:
         print(f"[ERROR] send_message(Игра начинается): {e!r}")
@@ -1864,7 +1864,8 @@ async def cmd_create(message: Message) -> None:
     elif room.started:
         await message.answer("Игра уже идет. Заверши текущую игру перед новой регистрацией.")
         return
-    else:
+
+    if room is not None and room.registration_open:
         room.chat_title = message.chat.title or "Групповой чат"
         join_link = await registration_join_link(message, message.chat.id)
         if room.registration_message_id is None:
@@ -1882,6 +1883,10 @@ async def cmd_create(message: Message) -> None:
             "Лобби уже создано. Используй существующее сообщение регистрации "
             "и кнопку регистрации под ним."
         )
+        return
+
+    if room is None:
+        await message.answer("Не удалось создать лобби. Попробуй еще раз.")
         return
 
     room.chat_title = message.chat.title or "Групповой чат"
