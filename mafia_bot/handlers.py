@@ -404,8 +404,8 @@ async def launch_game_from_registration(bot: Bot, room, chat_id: int, chat_title
     except Exception as e:
         print(f"[ERROR] send_role_cards: {e!r}")
 
-    # Small pause so players can read their role card before the night UI arrives.
-    await asyncio.sleep(1)
+    # Wait 2 seconds before announcing night; roles are already sent at this point.
+    await asyncio.sleep(2)
 
     keyboard: InlineKeyboardMarkup | None = None
     try:
@@ -1324,7 +1324,6 @@ async def process_night_end(bot: Bot, chat_id: int, timer_reason: str | None = N
 
         if room.phase == PHASE_FINISHED:
             ensure_stats_recorded(room)
-            await bot.send_message(chat_id, info)
             await bot.send_message(chat_id, room.final_report_text())
             cancel_phase_timer(chat_id)
             persist_room(room)
@@ -1534,7 +1533,6 @@ async def process_day_end(bot: Bot, chat_id: int, timer_reason: str | None = Non
 
             if room.phase == PHASE_FINISHED:
                 ensure_stats_recorded(room)
-                await bot.send_message(chat_id, info)
                 await bot.send_message(chat_id, room.final_report_text())
                 cancel_phase_timer(chat_id)
                 persist_room(room)
@@ -1676,7 +1674,7 @@ async def restore_runtime_state(bot: Bot) -> None:
 
 async def maybe_finish_phase_early(bot: Bot, room) -> None:
     if room.phase == "night" and room.all_required_night_actions_done():
-        await process_night_end(bot, room.chat_id, timer_reason="⚡ Все ночные действия получены. Ночь завершается досрочно.")
+        await process_night_end(bot, room.chat_id, timer_reason=None)
         return
 
     if room.phase == "day" and room.day_stage == DAY_STAGE_NOMINATION and room.all_alive_day_voted():
@@ -2252,15 +2250,6 @@ async def on_trial_callback(callback: CallbackQuery) -> None:
         except Exception:
             pass
 
-    # Send group message about the vote
-    voter = room.get_player(callback.from_user.id)
-    if voter and candidate:
-        vote_text = "ЗА" if approve else "ПРОТИВ"
-        await callback.bot.send_message(
-            room.chat_id,
-            f"🗳️ {voter.full_name} проголосовал {vote_text} казни {candidate.full_name}"
-        )
-
     # If all have voted, proceed to next phase
     if room.all_alive_trial_voted():
         await process_day_end(callback.bot, room.chat_id, timer_reason="⚡ Все дневные голоса получены. День завершается досрочно.")
@@ -2443,6 +2432,9 @@ async def on_action_callback(callback: CallbackQuery) -> None:
         return
 
     if action == "vote":
+        if room.phase == PHASE_DAY and room.day_stage == DAY_STAGE_TRIAL:
+            await callback.answer("Сейчас идет повешение: можно только поставить 👍 или 👎 в чате.", show_alert=True)
+            return
         if callback.from_user.id in room.day_votes:
             await callback.answer("Выбор уже зафиксирован до конца голосования.", show_alert=True)
             return
@@ -2461,7 +2453,6 @@ async def on_action_callback(callback: CallbackQuery) -> None:
 
             await callback.message.edit_text(
                 locked_choice_text(room, callback.from_user.id, selected_name, selected_user_id),
-                reply_markup=locked_choice_keyboard(selected_name),
             )
 
             if voter is not None and target is not None:
@@ -2474,6 +2465,9 @@ async def on_action_callback(callback: CallbackQuery) -> None:
         return
 
     if action == "skipvote":
+        if room.phase == PHASE_DAY and room.day_stage == DAY_STAGE_TRIAL:
+            await callback.answer("Сейчас идет повешение: можно только поставить 👍 или 👎 в чате.", show_alert=True)
+            return
         if room.phase != PHASE_DAY or room.day_stage != DAY_STAGE_NOMINATION:
             await callback.answer("Сейчас не этап выбора кандидата.", show_alert=True)
             return
@@ -2491,7 +2485,6 @@ async def on_action_callback(callback: CallbackQuery) -> None:
         await callback.answer("Пропуск голосования принят.")
         await callback.message.edit_text(
             build_action_prompt_text(room, callback.from_user.id) + "\n\nТы выбрал пропуск",
-            reply_markup=locked_choice_keyboard("пропуск"),
         )
         await callback.bot.send_message(
             room.chat_id,

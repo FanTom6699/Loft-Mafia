@@ -555,6 +555,8 @@ class GameRoom:
             return False
 
         alive_ids = {p.user_id for p in self.alive_players()}
+        if self.trial_candidate_id is not None:
+            alive_ids.discard(self.trial_candidate_id)
         if not alive_ids:
             return False
 
@@ -616,6 +618,8 @@ class GameRoom:
             return False, "Игрок не найден."
         if not voter.alive:
             return False, "Ты выбыл из игры."
+        if self.trial_candidate_id is not None and voter.user_id == self.trial_candidate_id:
+            return False, "Кандидат на повешение не может голосовать за/против."
 
         self.trial_votes[voter_user_id] = approve
         return True, "Твой голос принят."
@@ -1041,15 +1045,21 @@ class GameRoom:
         if doctor_target_id is not None:
             healed_target = self.get_player(doctor_target_id)
             if healed_target is not None and healed_target.alive:
+                target_was_attacked = healed_target.user_id in attacks
                 doctor_self_heal_without_attack = (
                     doctor is not None
                     and healed_target.user_id == doctor.user_id
-                    and healed_target.user_id not in attacks
+                    and not target_was_attacked
                 )
                 if doctor_self_heal_without_attack:
                     self.add_night_report_line(
                         healed_target.user_id,
                         "Бинты, скальпель и ножницы не пригодились... И хорошо!",
+                    )
+                elif not target_was_attacked:
+                    self.add_night_report_line(
+                        healed_target.user_id,
+                        "👨🏼‍⚕️ Доктор приходил к тебе в гости",
                     )
                 else:
                     self.add_night_report_line(healed_target.user_id, "👨🏼‍⚕️ Доктор вылечил тебя")
@@ -1300,6 +1310,10 @@ class GameRoom:
         winners: list[Player] = []
         others: list[Player] = []
 
+        def player_link(player: Player) -> str:
+            safe_name = escape((player.full_name or "").strip() or f"Игрок {player.user_id}")
+            return f"<a href=\"tg://user?id={player.user_id}\">{safe_name}</a>"
+
         for player in self.players.values():
             is_winner = (
                 winner == "Мафия" and player.role in MAFIA_ROLES
@@ -1313,17 +1327,17 @@ class GameRoom:
 
         lines = ["Игра окончена!", f"Победили: {winner}", "", "Победители:"]
         for p in winners:
-            lines.append(f"  {p.full_name} - {ROLE_EMOJI.get(p.role, '')} <b>{p.role}</b>".rstrip())
+            lines.append(f"  {player_link(p)} - {ROLE_EMOJI.get(p.role, '')} <b>{p.role}</b>".rstrip())
 
         lines.extend(["", "Остальные участники:"])
         for p in others:
-            lines.append(f"  {p.full_name} - {ROLE_EMOJI.get(p.role, '')} <b>{p.role}</b>".rstrip())
+            lines.append(f"  {player_link(p)} - {ROLE_EMOJI.get(p.role, '')} <b>{p.role}</b>".rstrip())
 
         if self.suicide_winners:
             lines.extend(["", "Личная победа самоубийцы:"])
             for player in self.players.values():
                 if player.user_id in self.suicide_winners:
-                    lines.append(f"  {player.full_name}")
+                    lines.append(f"  {player_link(player)}")
 
         lines.extend(["", f"Игра длилась: {self.game_duration_text()}"])
         return "\n".join(lines)
