@@ -1884,6 +1884,15 @@ async def cmd_create(message: Message) -> None:
         return
 
     if room is not None and room.registration_open:
+        # If registration is already open, make sure timeout worker is actually running.
+        existing_timer = registration_timers.get(message.chat.id)
+        if existing_timer is None or existing_timer.done():
+            remaining = registration_remaining_seconds(room)
+            if remaining <= 0:
+                await process_registration_timeout(message.bot, message.chat.id)
+                return
+            await start_registration_timer(room, message.bot, remaining)
+
         room.chat_title = message.chat.title or "Групповой чат"
         join_link = await registration_join_link(message, message.chat.id)
         if room.registration_message_id is None:
