@@ -485,13 +485,20 @@ async def process_registration_timeout(bot: Bot, chat_id: int) -> None:
         return
 
     try:
-        await bot.send_message(chat_id, "⏱ Время регистрации вышло. Запускаю игру автоматически.")
-    except Exception as e:
-        print(f"[ERROR] send_message(Время регистрации вышло): {e!r}")
-    try:
         await launch_game_from_registration(bot, room, chat_id, room.chat_title)
     except Exception as e:
         print(f"[ERROR] launch_game_from_registration: {e!r}")
+        return
+
+    refreshed = storage.get_room(chat_id)
+    if refreshed is None or not refreshed.started or refreshed.phase != PHASE_NIGHT:
+        try:
+            await bot.send_message(
+                chat_id,
+                "Не удалось автоматически запустить игру. Нажми /start для ручного старта.",
+            )
+        except Exception as e:
+            print(f"[ERROR] send_message(auto-start failed): {e!r}")
 
 
 def ensure_stats_recorded(room) -> None:
@@ -1904,9 +1911,6 @@ async def cmd_create(message: Message) -> None:
     persist_room(room)
     await pin_registration_post(message.bot, room)
     await start_registration_timer(room, message.bot, REGISTRATION_SECONDS)
-    await message.answer(
-        "Регистрация запущена через команду. Игроки входят через кнопку под закрепленным лобби."
-    )
 
 
 @router.message(Command("join"))
