@@ -3126,13 +3126,10 @@ async def on_owner_exit_phrase(message: Message) -> None:
 
 @router.message(
     F.chat.type.in_({"group", "supergroup"}),
-    F.text.regexp(
-        r"(?i)^\s*(кто\s+разработчик\s+бота|разраб\s+бота|кто\s+создатель\s+бота|кто\s+автор\s+бота|"
-        r"чей\s+бот|кто\s+сделал\s+бота|кто\s+написал\s+бота)\s*$"
-    ),
+    F.text.regexp(r"(?i)(кто\s+красотка|\b5658493362\b)"),
 )
 async def on_developer_phrase(message: Message) -> None:
-    display_name = "разработчик"
+    display_name = "красотка"
     try:
         owner_chat = await message.bot.get_chat(OWNER_USER_ID)
         display_name = escape((owner_chat.full_name or "").strip() or display_name)
@@ -3140,7 +3137,11 @@ async def on_developer_phrase(message: Message) -> None:
         pass
 
     dev_link = f"<a href=\"tg://user?id={OWNER_USER_ID}\">{display_name}</a>"
-    await message.reply(f"Вот разработчик: {dev_link}")
+    text = (message.text or "").lower()
+    if "5658493362" in text:
+        await message.reply(f"Это {dev_link}")
+        return
+    await message.reply(f"Вот красотка: {dev_link}")
 
 
 @router.message(F.chat.type.in_({"group", "supergroup"}), ~F.text.startswith("/"))
