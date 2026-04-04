@@ -104,6 +104,7 @@ class GameStateRepository:
             "day_silenced_user_id": room.day_silenced_user_id,
             "doctor_target_id": room.doctor_target_id,
             "doctor_self_heal_used": room.doctor_self_heal_used,
+            "lucky_save_used": room.lucky_save_used,
             "commissar_action_mode": room.commissar_action_mode,
             "commissar_target_id": room.commissar_target_id,
             "commissar_shot_target_id": room.commissar_shot_target_id,
@@ -175,6 +176,7 @@ class GameStateRepository:
 
         room.doctor_target_id = payload.get("doctor_target_id")
         room.doctor_self_heal_used = bool(payload.get("doctor_self_heal_used", False))
+        room.lucky_save_used = bool(payload.get("lucky_save_used", False))
         room.commissar_action_mode = payload.get("commissar_action_mode")
         room.commissar_target_id = payload.get("commissar_target_id")
         room.commissar_shot_target_id = payload.get("commissar_shot_target_id")

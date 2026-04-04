@@ -203,6 +203,7 @@ class GameRoom:
     day_silenced_user_id: int | None = None
     doctor_target_id: int | None = None
     doctor_self_heal_used: bool = False
+    lucky_save_used: bool = False
     commissar_action_mode: str | None = None
     commissar_target_id: int | None = None
     commissar_shot_target_id: int | None = None
@@ -263,6 +264,7 @@ class GameRoom:
         self.day_silenced_user_id = None
         self.doctor_target_id = None
         self.doctor_self_heal_used = False
+        self.lucky_save_used = False
         self.commissar_action_mode = None
         self.commissar_target_id = None
         self.commissar_shot_target_id = None
@@ -321,6 +323,7 @@ class GameRoom:
         self.day_silenced_user_id = None
         self.doctor_target_id = None
         self.doctor_self_heal_used = False
+        self.lucky_save_used = False
         self.commissar_action_mode = None
         self.commissar_target_id = None
         self.commissar_shot_target_id = None
@@ -1144,8 +1147,14 @@ class GameRoom:
                 continue
             sources = attacks.get(target_id, [])
             source_count = len(sources)
-            if target.role == ROLE_LUCKY and source_count == 1 and random.random() < 0.5:
+            if (
+                target.role == ROLE_LUCKY
+                and not self.lucky_save_used
+                and source_count == 1
+                and random.random() < 0.5
+            ):
                 self.add_night_report_line(target.user_id, "Тебя пытались убить, но тебе повезло!")
+                self.lucky_save_used = True
                 continue
 
             target.alive = False
