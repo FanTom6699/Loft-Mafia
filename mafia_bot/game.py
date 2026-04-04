@@ -107,7 +107,7 @@ ROLE_ACTION_RULES = {
 
 def role_card_text(role: str, chat_title: str) -> str:
     emoji = ROLE_EMOJI.get(role, "")
-    header = f"Ты - {emoji} {role}!".strip()
+    header = f"<b>Ты - {emoji} {role}!</b>".strip()
     description = ROLE_DESCRIPTION.get(role, "У этой роли пока нет описания.")
     return f"{header}\n{description}"
 
@@ -1073,7 +1073,7 @@ class GameRoom:
                 continue
             source_count = len(attacks[target_id])
             if target.role == ROLE_LUCKY and source_count == 1 and random.random() < 0.5:
-                self.add_night_report_line(target.user_id, "Тебя попытались убить, но тебе повезло!")
+                self.add_night_report_line(target.user_id, "Этой ночью тебя пытались убить, но атака не удалась.")
                 continue
 
             target.alive = False
@@ -1384,7 +1384,7 @@ class GameRoom:
             return "Живых игроков нет."
 
         seat_positions = {p.user_id: i for i, p in enumerate(self.players.values(), start=1)}
-        lines = ["Живые игроки:"]
+        lines = ["<b>Живые игроки:</b>"]
         for player in sorted(alive, key=lambda p: seat_positions.get(p.user_id, 10**9)):
             seat_no = seat_positions.get(player.user_id)
             raw_name = (player.full_name or "").strip()
@@ -1410,9 +1410,9 @@ class GameRoom:
             else:
                 parts.append(f"{ROLE_EMOJI.get(role, '')} <b>{role}</b> - <b>{count}</b>".strip())
         return (
-            "Кто-то из них:\n"
+            "<b>Кто-то из них:</b>\n"
             + ", ".join(parts)
-            + f"\nВсего: {len(self.alive_players())} чел."
+            + f"\nВсего: <b>{len(self.alive_players())}</b> чел."
         )
 
     def game_duration_text(self) -> str:
@@ -1462,14 +1462,14 @@ class GameRoom:
 
     def night_intro_text(self) -> str:
         return (
-            "🌃 Наступает ночь\n"
+            "<b>🌃 Наступает ночь</b>\n"
             "На улицы города выходят лишь самые отважные и бесстрашные.\n"
             "Утром попробуем сосчитать их головы..."
         )
 
     def night_media_caption(self) -> str:
         return (
-            "🌃 Наступает ночь\n"
+            "<b>🌃 Наступает ночь</b>\n"
             "На улицы города выходят лишь самые отважные и бесстрашные.\n"
             "Утром попробуем сосчитать их головы..."
         )

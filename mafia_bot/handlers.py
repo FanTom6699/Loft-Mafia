@@ -58,7 +58,7 @@ def read_phase_seconds(name: str, default: int) -> int:
 
 NIGHT_PHASE_SECONDS = read_phase_seconds("NIGHT_PHASE_SECONDS", 60)
 DAY_DISCUSSION_SECONDS = read_phase_seconds("DAY_DISCUSSION_SECONDS", 60)
-DAY_NOMINATION_SECONDS = read_phase_seconds("DAY_NOMINATION_SECONDS", 60)
+DAY_NOMINATION_SECONDS = read_phase_seconds("DAY_NOMINATION_SECONDS", 45)
 DAY_TRIAL_SECONDS = read_phase_seconds("DAY_TRIAL_SECONDS", 60)
 REGISTRATION_SECONDS = read_phase_seconds("REGISTRATION_SECONDS", 60)
 REGISTRATION_EXTENSION_SECONDS = read_phase_seconds("REGISTRATION_EXTENSION_SECONDS", 30)
@@ -412,8 +412,8 @@ async def launch_game_from_registration(bot: Bot, room, chat_id: int, chat_title
     try:
         await bot.send_message(
             chat_id,
-            "Игра начинается!\n\n"
-            "В течение нескольких секунд бот пришлёт вам личное сообщение с ролью и её описанием.",
+            "<b>Игра начинается!</b>\n\n"
+            "<i>В течение нескольких секунд бот пришлёт вам личное сообщение с ролью и её описанием.</i>",
         )
     except Exception as e:
         print(f"[ERROR] send_message(Игра начинается): {e!r}")
@@ -725,19 +725,19 @@ async def registration_join_link(message: Message, chat_id: int) -> str:
 
 
 def registration_text(room) -> str:
-    lines = ["Ведётся набор в игру", ""]
+    lines = ["<b>Ведётся набор в игру</b>", ""]
     if not room.players:
         lines.append("Зарегистрировались::")
         lines.append("Пока никто не зарегистрировался.")
         lines.append("")
-        lines.append("Итого 0 чел.")
+        lines.append("Итого <b>0</b> чел.")
         return "\n".join(lines)
 
     joined_names = ", ".join(player_profile_link(player) for player in room.players.values())
     lines.append("Зарегистрировались::")
     lines.append(joined_names)
     lines.append("")
-    lines.append(f"Итого {len(room.players)} чел.")
+    lines.append(f"Итого <b>{len(room.players)}</b> чел.")
     return "\n".join(lines)
 
 
@@ -745,7 +745,7 @@ def registration_post_text(room) -> str:
     remaining = registration_remaining_seconds(room)
     if remaining <= 0:
         remaining = REGISTRATION_SECONDS
-    return registration_text(room) + f"\n\nДо окончания регистрации осталось {remaining} сек."
+    return registration_text(room) + f"\n\nДо окончания регистрации осталось <b>{remaining}</b> сек."
 
 
 async def private_bot_link(bot: Bot) -> str:
@@ -981,8 +981,6 @@ def build_action_keyboard(room, actor_user_id: int) -> InlineKeyboardMarkup | No
         return None
 
     rows: list[list[InlineKeyboardButton]] = []
-    all_players_order = list(room.players.values())
-    seat_positions = {p.user_id: i for i, p in enumerate(all_players_order, start=1)}
     alive_players = room.alive_players()
     alive_targets = [p for p in alive_players if p.user_id != actor_user_id]
     selected_target_id = selected_target_for_actor(room, actor_user_id)
@@ -991,11 +989,8 @@ def build_action_keyboard(room, actor_user_id: int) -> InlineKeyboardMarkup | No
         return f"✅ {name}" if selected_target_id == user_id else name
 
     def target_label(target, teammate_mark: str = "") -> str:
-        position = seat_positions.get(target.user_id)
         base_name = player_display_name(target)
-        if position is None:
-            return f"{teammate_mark} {base_name}".strip()
-        return f"{position}.{teammate_mark} {base_name}".strip()
+        return f"{teammate_mark} {base_name}".strip()
 
     if room.phase == "night":
         if actor.role in {"Дон", "Мафия"}:
@@ -1185,7 +1180,17 @@ def build_action_prompt_text(room, actor_user_id: int) -> str:
 def night_status_text(room) -> str:
     alive = room.alive_players()
     seat_positions = {p.user_id: i for i, p in enumerate(room.players.values(), start=1)}
-    lines = ["Живые игроки:"]
+
+    def format_sleep_left(seconds: int) -> str:
+        total = max(0, int(seconds))
+        minutes, secs = divmod(total, 60)
+        if minutes > 0 and secs > 0:
+            return f"{minutes} мин. {secs} сек."
+        if minutes > 0:
+            return f"{minutes} мин."
+        return f"{secs} сек."
+
+    lines = ["<b>Живые игроки:</b>"]
     for player in sorted(alive, key=lambda p: seat_positions.get(p.user_id, 10**9)):
         seat_no = seat_positions.get(player.user_id)
         raw_name = (player.full_name or "").strip()
@@ -1195,7 +1200,8 @@ def night_status_text(room) -> str:
             lines.append(f"<a href=\"tg://user?id={player.user_id}\">{safe_name}</a>")
         else:
             lines.append(f"{seat_no}. <a href=\"tg://user?id={player.user_id}\">{safe_name}</a>")
-    lines.append(f"\nСпать осталось {NIGHT_PHASE_SECONDS} сек.")
+
+    lines.append(f"\n<b>Спать осталось {format_sleep_left(NIGHT_PHASE_SECONDS)}</b>")
     return "\n".join(lines)
 
 
@@ -1351,6 +1357,27 @@ async def prompt_last_words(bot: Bot, room, eliminated) -> None:
             continue
 
 
+def compact_night_report_messages(lines: list[str]) -> list[str]:
+    if not lines:
+        return []
+
+    messages: list[str] = []
+    i = 0
+    while i < len(lines):
+        current = lines[i]
+        next_line = lines[i + 1] if i + 1 < len(lines) else None
+
+        if current == "Тебя убили :(" and next_line == "Ты можешь отправить сюда своё предсмертное сообщение":
+            messages.append(f"{current}\n{next_line}")
+            i += 2
+            continue
+
+        messages.append(current)
+        i += 1
+
+    return messages
+
+
 async def process_night_end(bot: Bot, chat_id: int, timer_reason: str | None = None) -> None:
     lock = get_phase_lock(chat_id)
     async with lock:
@@ -1384,12 +1411,18 @@ async def process_night_end(bot: Bot, chat_id: int, timer_reason: str | None = N
 
         reports = room.pop_night_reports()
         kill_sources = room.pop_night_kill_sources()
+        lucky_triggered = False
         for user_id, lines in reports.items():
             try:
-                for line in lines:
-                    await bot.send_message(user_id, line)
+                for message_text in compact_night_report_messages(lines):
+                    if "пытались убить, но атака не удалась" in message_text.lower():
+                        lucky_triggered = True
+                    await safe_send_message(bot, user_id, message_text)
             except Exception:
                 continue
+
+        if lucky_triggered:
+            await bot.send_message(chat_id, "☝️ Кому-то из игроков повезло")
 
         await send_phase_media(bot, chat_id, room.day_media_caption(), DAY_IMAGE_PATH)
 
@@ -1466,9 +1499,8 @@ async def process_day_end(bot: Bot, chat_id: int, timer_reason: str | None = Non
             await bot.send_message(
                 chat_id,
                 (
-                    "Пришло время определить и наказать виновного.\n"
-                    "Выберите кандидата на выгон.\n"
-                    f"Голосование продлится: {DAY_NOMINATION_SECONDS} сек."
+                    "<b>Пришло время определить и наказать виновных.</b>\n"
+                    f"Голосование продлится {DAY_NOMINATION_SECONDS} секунд"
                 ),
                 reply_markup=private_keyboard,
             )
@@ -1600,7 +1632,7 @@ async def process_day_end(bot: Bot, chat_id: int, timer_reason: str | None = Non
                 await safe_send_message(
                     bot,
                     chat_id,
-                    f"Результаты голосования:\n{yes_count} 👍 | {no_count} 👎\n\nВешаем {first_mark}! :)",
+                    f"<b>Результаты голосования:</b>\n<b>{yes_count}</b> 👍  |  <b>{no_count}</b> 👎\n\nВешаем {first_mark}! :)",
                 )
                 await asyncio.sleep(2)
                 await safe_send_message(bot, chat_id, f"{first_mark} был {role_text}")
@@ -1632,7 +1664,7 @@ async def process_day_end(bot: Bot, chat_id: int, timer_reason: str | None = Non
                     bot,
                     chat_id,
                     "Мнения жителей разошлись\n"
-                    f"({yes_count} 👍 | {no_count} 👎 )... Разошлись и сами жители, так никого и не повесив...",
+                    f"(<b>{yes_count}</b> 👍 | <b>{no_count}</b> 👎 )... Разошлись и сами жители, так никого и не повесив...",
                 )
 
             if don_transfer_note:
@@ -1801,7 +1833,7 @@ def mafia_allies_text(room) -> str:
     if not allies:
         return ""
 
-    lines = ["", "Запомни своих союзников:"]
+    lines = ["", "<b>Запомни своих союзников:</b>"]
     for ally in allies:
         role_mark = role_mark_text(ally.role)
         lines.append(f"  {ally.full_name} - {role_mark}")
@@ -1822,26 +1854,29 @@ def city_power_allies_text(room, role: str) -> str:
     if not lines:
         return ""
 
-    return "\n\nЗапомни своих союзников:\n" + "\n".join(lines)
+    return "\n\n<b>Запомни своих союзников:</b>\n" + "\n".join(lines)
 
 
 def role_card_for_player(room, player, chat_title: str) -> str:
+    title_line = f"Ты присоединился к игре в <b>{escape(chat_title)}</b>."
+
     if player.role == ROLE_SERGEANT:
         base = (
-            "Ты - 👮🏼‍♂️ Сержант!\n"
+            "<b>Ты - 👮🏼‍♂️ Сержант!</b>\n"
             "Помощник комиссара Каттани. Он будет информировать тебя о своих действиях "
             "и держать в курсе событий. Если комиссар погибнет - ты займёшь его место."
         )
-        return base + city_power_allies_text(room, ROLE_SERGEANT)
+        return title_line + "\n\n" + base + city_power_allies_text(room, ROLE_SERGEANT)
 
     if player.role == ROLE_COMMISSAR:
         base = (
-            "Ты - 🕵️‍ Комиссар Каттани!\n"
+            "<b>Ты - 🕵️‍ Комиссар Каттани!</b>\n"
             "Главный городской защитник и гроза мафии..."
         )
-        return base + city_power_allies_text(room, ROLE_COMMISSAR)
+        return title_line + "\n\n" + base + city_power_allies_text(room, ROLE_COMMISSAR)
 
     card_text = role_card_text(player.role, chat_title)
+    card_text = title_line + "\n\n" + card_text
     if player.role in {ROLE_DON, ROLE_MAFIA}:
         card_text += mafia_allies_text(room)
     return card_text
