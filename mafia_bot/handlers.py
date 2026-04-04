@@ -1,6 +1,7 @@
 import asyncio
 import os
 import time
+import traceback
 from datetime import datetime
 from html import escape
 
@@ -2287,71 +2288,96 @@ async def cmd_day_end(message: Message) -> None:
 
 @router.callback_query(F.data.startswith("trial:"))
 async def on_trial_callback(callback: CallbackQuery) -> None:
-    if callback.message is None or callback.from_user is None:
-        return
-
-    parts = callback.data.split(":")
-    if len(parts) != 3:
-        await callback.answer("Некорректное голосование.", show_alert=True)
-        return
-
-    _, raw_vote, raw_chat_id = parts
     try:
-        chat_id = int(raw_chat_id)
-    except ValueError:
-        await callback.answer("Некорректный чат.", show_alert=True)
-        return
+        if callback.message is None or callback.from_user is None:
+            return
 
-    room = storage.get_room(chat_id)
-    if room is None or room.phase != PHASE_DAY or room.day_stage != DAY_STAGE_TRIAL:
-        await callback.answer("Сейчас нет активного голосования за/против.", show_alert=True)
-        return
+        parts = callback.data.split(":")
+        if len(parts) != 3:
+            await callback.answer("Некорректное голосование.", show_alert=True)
+            return
 
-    if callback.message.chat.id != room.chat_id:
-        await callback.answer("Голосование проходит в групповом чате.", show_alert=True)
-        return
+        _, raw_vote, raw_chat_id = parts
+        if raw_vote not in {"yes", "no"}:
+            await callback.answer("Некорректный вариант голоса.", show_alert=True)
+            return
 
-    voter = room.get_player(callback.from_user.id)
-    if voter is None or not voter.alive:
-        await callback.answer("Ты не участвуешь в этом голосовании.", show_alert=True)
-        return
-
-    approve = raw_vote == "yes"
-    ok, info = room.set_trial_vote(callback.from_user.id, approve)
-    await callback.answer(info, show_alert=not ok)
-    if not ok:
-        return
-    persist_room(room)
-
-    # Update shared group vote message after vote
-    yes_count, no_count = room.trial_vote_counts()
-    candidate = room.get_player(room.trial_candidate_id) if room.trial_candidate_id is not None else None
-    candidate_mark = player_profile_link(candidate) if candidate is not None else "кандидат"
-    choice_text = "ЗА" if approve else "ПРОТИВ"
-    try:
-        await callback.message.edit_text(
-            f"Вы точно хотите линчевать {candidate_mark}?",
-            reply_markup=trial_vote_keyboard(chat_id, yes_count, no_count),
-        )
-    except Exception:
         try:
-            await callback.message.edit_reply_markup(reply_markup=trial_vote_keyboard(chat_id, yes_count, no_count))
-        except Exception:
-            pass
+            chat_id = int(raw_chat_id)
+        except ValueError:
+            await callback.answer("Некорректный чат.", show_alert=True)
+            return
 
-    # If all have voted, proceed to next phase
-    if room.all_alive_trial_voted():
-        completion_text = f"Вы точно хотите линчевать {candidate_mark}?\n\nГолосование завершено"
+        room = storage.get_room(chat_id)
+        if room is None or room.phase != PHASE_DAY or room.day_stage != DAY_STAGE_TRIAL:
+            await callback.answer("Сейчас нет активного голосования за/против.", show_alert=True)
+            return
+
+        if callback.message.chat.id != room.chat_id:
+            await callback.answer("Голосование проходит в групповом чате.", show_alert=True)
+            return
+
+        voter = room.get_player(callback.from_user.id)
+        if voter is None or not voter.alive:
+            await callback.answer("Ты не участвуешь в этом голосовании.", show_alert=True)
+            return
+
+        approve = raw_vote == "yes"
+        ok, info = room.set_trial_vote(callback.from_user.id, approve)
+        await callback.answer(info, show_alert=not ok)
+        if not ok:
+            return
+        persist_room(room)
+
+        # Update shared group vote message after vote.
+        yes_count, no_count = room.trial_vote_counts()
+        candidate = room.get_player(room.trial_candidate_id) if room.trial_candidate_id is not None else None
+        candidate_mark = player_profile_link(candidate) if candidate is not None else "кандидат"
         try:
-            await callback.message.edit_text(completion_text)
+            await callback.message.edit_text(
+                f"Вы точно хотите линчевать {candidate_mark}?",
+                reply_markup=trial_vote_keyboard(chat_id, yes_count, no_count),
+            )
         except Exception:
             try:
-                await callback.message.edit_reply_markup(reply_markup=None)
+                await callback.message.edit_reply_markup(reply_markup=trial_vote_keyboard(chat_id, yes_count, no_count))
             except Exception:
                 pass
-        await process_day_end(callback.bot, room.chat_id, timer_reason=None)
-    else:
-        await maybe_finish_phase_early(callback.bot, room)
+
+        # If all eligible voters have voted, proceed to next phase.
+        candidate_id = room.trial_candidate_id
+        eligible_voter_ids = {
+            player.user_id
+            for player in room.alive_players()
+            if candidate_id is None or player.user_id != candidate_id
+        }
+        received_vote_ids = {user_id for user_id in room.trial_votes if user_id in eligible_voter_ids}
+        trial_complete = received_vote_ids == eligible_voter_ids
+
+        if room.all_alive_trial_voted() or trial_complete:
+            print(
+                "[TRIAL] voting_complete "
+                f"chat_id={room.chat_id}, eligible={len(eligible_voter_ids)}, received={len(received_vote_ids)}, "
+                f"yes={yes_count}, no={no_count}"
+            )
+            completion_text = f"Вы точно хотите линчевать {candidate_mark}?\n\nГолосование завершено"
+            try:
+                await callback.message.edit_text(completion_text)
+            except Exception:
+                try:
+                    await callback.message.edit_reply_markup(reply_markup=None)
+                except Exception:
+                    pass
+            await process_day_end(callback.bot, room.chat_id, timer_reason=None)
+        else:
+            await maybe_finish_phase_early(callback.bot, room)
+    except Exception as e:
+        print(f"[ERROR] on_trial_callback: chat_id={getattr(getattr(callback, 'message', None), 'chat', None) and callback.message.chat.id}, error={e!r}")
+        print(traceback.format_exc())
+        try:
+            await callback.answer("Произошла ошибка при голосовании. Попробуй еще раз.", show_alert=True)
+        except Exception:
+            pass
 
 
 @router.callback_query(F.data.startswith("act:"))
