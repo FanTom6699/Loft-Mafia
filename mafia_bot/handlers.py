@@ -96,9 +96,18 @@ def cancel_phase_timer(chat_id: int) -> None:
 
 
 def cancel_registration_timer(chat_id: int) -> None:
-    timer = registration_timers.pop(chat_id, None)
-    if timer is not None:
-        timer.cancel()
+    timer = registration_timers.get(chat_id)
+    if timer is None:
+        return
+
+    current = asyncio.current_task()
+    if timer is current:
+        # Timer callback reached registration timeout itself; avoid self-cancel.
+        registration_timers.pop(chat_id, None)
+        return
+
+    registration_timers.pop(chat_id, None)
+    timer.cancel()
 
 
 def current_day_stage_seconds(room) -> int:
