@@ -1068,13 +1068,13 @@ def build_action_keyboard(room, actor_user_id: int) -> InlineKeyboardMarkup | No
 
     if room.phase == "night":
         if actor.role in {"Дон", "Мафия"}:
-            mafia_teammate_ids = {p.user_id for p in alive_players if p.role in {ROLE_DON, ROLE_MAFIA}}
             for target in alive_targets:
-                teammate_mark = " 🤵🏻" if target.user_id in mafia_teammate_ids else ""
+                if target.role in {ROLE_DON, ROLE_MAFIA}:
+                    continue
                 rows.append(
                     [
                         InlineKeyboardButton(
-                            text=mark(target_label(target, teammate_mark), target.user_id),
+                            text=mark(target_label(target), target.user_id),
                             callback_data=f"act:kill:{room.chat_id}:{target.user_id}",
                         )
                     ]
@@ -3085,6 +3085,13 @@ async def on_private_text(message: Message) -> None:
 
     last_word_room = get_pending_last_word_room(message.from_user.id)
     if last_word_room is not None:
+        if last_word_room.phase == PHASE_FINISHED:
+            if message.from_user.id in last_word_room.pending_last_words:
+                last_word_room.pending_last_words.discard(message.from_user.id)
+                persist_room(last_word_room)
+            await message.answer("Игра закончилась. Предсмертное сообщение больше нельзя отправить.")
+            return
+
         ok, payload = last_word_room.consume_last_word(message.from_user.id, text)
         if not ok:
             await message.answer(payload)
