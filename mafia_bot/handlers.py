@@ -6,7 +6,7 @@ from datetime import datetime
 from html import escape
 
 from aiogram import F, Router
-from aiogram.exceptions import TelegramBadRequest, TelegramRetryAfter
+from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError, TelegramRetryAfter
 from aiogram.filters import Command, CommandObject, CommandStart
 from aiogram.types import CallbackQuery, FSInputFile, InlineKeyboardButton, InlineKeyboardMarkup, Message, User
 from aiogram import Bot
@@ -71,6 +71,7 @@ registration_timers: dict[int, asyncio.Task] = {}
 phase_locks: dict[int, asyncio.Lock] = {}
 chat_penalties: dict[int, dict[int, dict[str, float | int | bool]]] = {}
 action_menu_messages: dict[int, dict[int, int]] = {}
+delete_permission_alerted_chats: set[int] = set()
 OWNER_USER_ID = 5658493362
 
 
@@ -615,9 +616,36 @@ def format_player_stats_text(stats: dict) -> str:
     )
 
 
+async def notify_missing_delete_permission_once(bot: Bot, chat_id: int) -> None:
+    if chat_id in delete_permission_alerted_chats:
+        return
+    delete_permission_alerted_chats.add(chat_id)
+    try:
+        await bot.send_message(
+            chat_id,
+            "Я не могу удалять сообщения. Выдайте боту право администратора: Удалять сообщения.",
+        )
+    except Exception:
+        pass
+
+
 async def safe_delete_message(message: Message) -> None:
     try:
         await message.delete()
+    except TelegramForbiddenError:
+        if message.chat.type in {"group", "supergroup"}:
+            await notify_missing_delete_permission_once(message.bot, message.chat.id)
+        return
+    except TelegramBadRequest as e:
+        error_text = str(e).lower()
+        if message.chat.type in {"group", "supergroup"} and (
+            "not enough rights" in error_text
+            or "have no rights" in error_text
+            or "message can't be deleted" in error_text
+            or "message cannot be deleted" in error_text
+        ):
+            await notify_missing_delete_permission_once(message.bot, message.chat.id)
+        return
     except Exception:
         return
 
@@ -675,6 +703,20 @@ async def is_group_admin(bot: Bot, chat_id: int, user_id: int) -> bool:
     except Exception:
         return False
     return member.status in {"administrator", "creator"}
+
+
+async def bot_has_delete_permission(bot: Bot, chat_id: int) -> bool:
+    try:
+        me = await bot.get_me()
+        member = await bot.get_chat_member(chat_id, me.id)
+    except Exception:
+        return False
+
+    if member.status == "creator":
+        return True
+    if member.status != "administrator":
+        return False
+    return bool(getattr(member, "can_delete_messages", False))
 
 
 async def process_rule_violation(message: Message) -> None:
@@ -1459,7 +1501,7 @@ async def process_night_end(bot: Bot, chat_id: int, timer_reason: str | None = N
         for user_id, lines in reports.items():
             try:
                 for message_text in compact_night_report_messages(lines):
-                    if "пытались убить, но атака не удалась" in message_text.lower():
+                    if "пытались убить, но тебе повезло" in message_text.lower():
                         lucky_triggered = True
                     await safe_send_message(bot, user_id, message_text)
             except Exception:
@@ -1583,34 +1625,11 @@ async def process_day_end(bot: Bot, chat_id: int, timer_reason: str | None = Non
 
             if candidate_id is None:
                 print(f"[PHASE] process_day_end: no single candidate selected, ending day without lynch for chat_id={chat_id}")
-                votes_by_target: dict[int, int] = {}
-                for target_id in room.day_votes.values():
-                    target = room.get_player(target_id)
-                    if target is None or not target.alive:
-                        continue
-                    votes_by_target[target.user_id] = votes_by_target.get(target.user_id, 0) + 1
-
-                if votes_by_target:
-                    sorted_votes = sorted(votes_by_target.items(), key=lambda item: item[1], reverse=True)
-                    vote_lines: list[str] = []
-                    for target_id, count in sorted_votes:
-                        target = room.get_player(target_id)
-                        if target is None:
-                            continue
-                        vote_lines.append(f"- {target.full_name}: {count}")
-                    if vote_lines:
-                        await bot.send_message(
-                            chat_id,
-                            "Голоса на этапе выбора кандидата разделились поровну.\n"
-                            "🗿 Жители решили никого не вешать...\n\n"
-                            "Итоги голосования:\n"
-                            + "\n".join(vote_lines),
-                        )
-                else:
-                    await bot.send_message(
-                        chat_id,
-                        "Голосование окончено\n🗿 Жители решили никого не вешать...",
-                    )
+                await bot.send_message(
+                    chat_id,
+                    "Голоса на этапе выбора кандидата разделились поровну.\n"
+                    "🗿 Жители решили никого не вешать...",
+                )
 
                 ok_end, info_end = room.end_day_no_lynch()
                 print(f"[PHASE] process_day_end: end_day_no_lynch result for chat_id={chat_id}, ok_end={ok_end}, info={info_end}")
@@ -2075,6 +2094,12 @@ async def cmd_create(message: Message) -> None:
     await cleanup_group_command_message(message)
     if message.chat.type == "private":
         await message.answer("Создавай лобби в групповом чате.")
+        return
+
+    if not await bot_has_delete_permission(message.bot, message.chat.id):
+        await message.answer(
+            "Не могу открыть регистрацию: дайте боту право администратора «Удалять сообщения»."
+        )
         return
 
     if is_user_blocked(message.chat.id, message.from_user.id):

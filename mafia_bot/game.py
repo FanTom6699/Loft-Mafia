@@ -1136,7 +1136,7 @@ class GameRoom:
             sources = attacks.get(target_id, [])
             source_count = len(sources)
             if target.role == ROLE_LUCKY and source_count == 1 and random.random() < 0.5:
-                self.add_night_report_line(target.user_id, "Этой ночью тебя пытались убить, но атака не удалась.")
+                self.add_night_report_line(target.user_id, "Тебя пытались убить, но тебе повезло!")
                 continue
 
             target.alive = False
