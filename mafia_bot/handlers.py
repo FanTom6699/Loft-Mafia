@@ -1114,11 +1114,16 @@ def build_action_keyboard(room, actor_user_id: int) -> InlineKeyboardMarkup | No
                 )
 
     if room.phase == "day" and room.day_stage == DAY_STAGE_NOMINATION:
+        mafia_teammate_ids: set[int] = set()
+        if actor.role in {ROLE_DON, ROLE_MAFIA}:
+            mafia_teammate_ids = {p.user_id for p in alive_players if p.role in {ROLE_DON, ROLE_MAFIA}}
+
         for target in alive_targets:
+            teammate_mark = " 🤵🏻" if target.user_id in mafia_teammate_ids else ""
             rows.append(
                 [
                     InlineKeyboardButton(
-                        text=mark(target_label(target), target.user_id),
+                        text=mark(target_label(target, teammate_mark), target.user_id),
                         callback_data=f"act:vote:{room.chat_id}:{target.user_id}",
                     )
                 ]
@@ -2952,7 +2957,7 @@ async def on_private_text(message: Message) -> None:
         await message.answer("Предсмертное сообщение принято.")
         await message.bot.send_message(
             last_word_room.chat_id,
-            f"Кто-то из жителей слышал, как {player_mark} кричал перед смертью:\n{safe_payload}",
+            f"Кто-то из жителей слышал, как {player_mark} кричал перед смертью:\n<b>{safe_payload}</b>",
         )
         return
 
