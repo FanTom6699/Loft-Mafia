@@ -2595,19 +2595,18 @@ async def on_action_callback(callback: CallbackQuery) -> None:
     async def announce_night_role_once(role_name: str) -> None:
         if room.phase != "night":
             return
-        if role_name == ROLE_KAMIKAZE:
-            return
         if not room.mark_night_role_announced(role_name):
             return
         role_announcement = {
-            ROLE_COMMISSAR: "🕵️ Комиссар Каттани ушёл искать злодеев...",
-            ROLE_BUM: "🧙🏼‍♂️ Бомж пошёл к кому-то за бутылкой...",
-            ROLE_MANIAC: "🔪 Маньяк спрятался глубоко в кустах...",
-            ROLE_ADVOCATE: "👨🏼‍💼 Адвокат ищет мафию для защиты...",
-            ROLE_MISTRESS: "💃🏼 Любовница уже ждёт кого-то в гости...",
-            ROLE_DOCTOR: "👨🏼‍⚕️ Доктор вышел на ночное дежурство...",
-            ROLE_DON: "🤵🏻 Мафия выбрала жертву...",
-            ROLE_MAFIA: "🤵🏻 Мафия выбрала жертву...",
+            ROLE_COMMISSAR: "<b>🕵️ Комиссар Каттани</b> ушёл искать злодеев...",
+            ROLE_BUM: "<b>🧙🏼‍♂️ Бомж</b> пошёл к кому-то за бутылкой...",
+            ROLE_MANIAC: "<b>🔪 Маньяк</b> спрятался глубоко в кустах...",
+            ROLE_ADVOCATE: "<b>👨🏼‍💼 Адвокат</b> ищет мафию для защиты...",
+            ROLE_MISTRESS: "<b>💃🏼 Любовница</b> уже ждёт кого-то в гости...",
+            ROLE_DOCTOR: "<b>👨🏼‍⚕️ Доктор</b> вышел на ночное дежурство...",
+            ROLE_KAMIKAZE: "<b>💣 Камикадзе</b> решил забрать кого-то с собой...",
+            ROLE_DON: "<b>🤵🏻 Мафия</b> выбрала жертву...",
+            ROLE_MAFIA: "<b>🤵🏻 Мафия</b> выбрала жертву...",
         }
         announcement_text = role_announcement.get(role_name)
         if announcement_text is None:

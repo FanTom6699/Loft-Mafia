@@ -1072,9 +1072,42 @@ class GameRoom:
         if self.kamikaze_pending_user_id is not None and self.kamikaze_target_id is not None:
             attacks.setdefault(self.kamikaze_target_id, []).append("камикадзе")
 
+        def night_kamikaze_revenge_targets(victim_user_id: int, sources: list[str]) -> list[int]:
+            targets: list[int] = []
+
+            for source in sources:
+                if source == "мафия":
+                    # By game rule, from mafia side Kamikaze retaliates only against Don.
+                    if don is not None and don.alive:
+                        targets.append(don.user_id)
+
+                if source == "маньяк" and maniac is not None and maniac.alive:
+                    targets.append(maniac.user_id)
+
+                if source == "комиссар" and commissar is not None and commissar.alive:
+                    targets.append(commissar.user_id)
+
+                if source == "камикадзе":
+                    revenge_user_id = self.kamikaze_pending_user_id
+                    if revenge_user_id is None or revenge_user_id == victim_user_id:
+                        continue
+                    revenge_player = self.get_player(revenge_user_id)
+                    if revenge_player is not None and revenge_player.alive:
+                        targets.append(revenge_user_id)
+
+            # Preserve order and remove duplicates.
+            return list(dict.fromkeys(targets))
+
         eliminated: list[Player] = []
         self.night_kill_sources.clear()
-        for target_id in attacks:
+        pending_targets = list(attacks.keys())
+        processed_targets: set[int] = set()
+        while pending_targets:
+            target_id = pending_targets.pop(0)
+            if target_id in processed_targets:
+                continue
+            processed_targets.add(target_id)
+
             target = self.get_player(target_id)
             if target is None or not target.alive:
                 continue
@@ -1083,15 +1116,31 @@ class GameRoom:
                 self.add_night_report_line(target.user_id, "Тебя убили :(")
                 self.add_night_report_line(target.user_id, "Ты можешь отправить сюда своё предсмертное сообщение")
                 self.last_doctor_saved_target_id = target.user_id
+
+                if target.role == ROLE_KAMIKAZE:
+                    sources = attacks.get(target_id, [])
+                    revenge_target_ids = night_kamikaze_revenge_targets(target.user_id, sources)
+                    for revenge_target_id in revenge_target_ids:
+                        attacks.setdefault(revenge_target_id, []).append("камикадзе")
+                        if revenge_target_id not in processed_targets:
+                            pending_targets.append(revenge_target_id)
                 continue
-            source_count = len(attacks[target_id])
+            sources = attacks.get(target_id, [])
+            source_count = len(sources)
             if target.role == ROLE_LUCKY and source_count == 1 and random.random() < 0.5:
                 self.add_night_report_line(target.user_id, "Этой ночью тебя пытались убить, но атака не удалась.")
                 continue
 
             target.alive = False
             eliminated.append(target)
-            self.night_kill_sources[target.user_id] = attacks[target_id]
+            self.night_kill_sources[target.user_id] = sources
+
+            if target.role == ROLE_KAMIKAZE:
+                revenge_target_ids = night_kamikaze_revenge_targets(target.user_id, sources)
+                for revenge_target_id in revenge_target_ids:
+                    attacks.setdefault(revenge_target_id, []).append("камикадзе")
+                    if revenge_target_id not in processed_targets:
+                        pending_targets.append(revenge_target_id)
 
         don_transfer_note: str | None = None
         don_successor_id: int | None = None
