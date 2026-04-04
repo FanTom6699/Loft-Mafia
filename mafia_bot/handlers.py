@@ -6,7 +6,7 @@ from datetime import datetime
 from html import escape
 
 from aiogram import F, Router
-from aiogram.exceptions import TelegramBadRequest
+from aiogram.exceptions import TelegramBadRequest, TelegramRetryAfter
 from aiogram.filters import Command, CommandObject, CommandStart
 from aiogram.types import CallbackQuery, FSInputFile, InlineKeyboardButton, InlineKeyboardMarkup, Message, User
 from aiogram import Bot
@@ -199,7 +199,31 @@ async def send_phase_media(
         except Exception:
             pass
 
-    await bot.send_message(chat_id, caption, reply_markup=reply_markup)
+    await safe_send_message(bot, chat_id, caption, reply_markup=reply_markup)
+
+
+async def safe_send_message(
+    bot: Bot,
+    chat_id: int,
+    text: str,
+    max_retries: int = 3,
+    **kwargs,
+):
+    attempt = 0
+    while True:
+        try:
+            return await bot.send_message(chat_id, text, **kwargs)
+        except TelegramRetryAfter as e:
+            attempt += 1
+            retry_after = max(int(getattr(e, "retry_after", 1)), 1)
+            print(
+                f"[RATE_LIMIT] send_message retry: chat_id={chat_id}, "
+                f"attempt={attempt}/{max_retries}, retry_after={retry_after}s"
+            )
+            if attempt > max_retries:
+                print(f"[RATE_LIMIT] send_message dropped after retries: chat_id={chat_id}")
+                return None
+            await asyncio.sleep(retry_after)
 
 
 def skipped_turn_keyboard(chat_id: int) -> InlineKeyboardMarkup:
@@ -1566,42 +1590,46 @@ async def process_day_end(bot: Bot, chat_id: int, timer_reason: str | None = Non
             ) = room.resolve_day_trial()
             if not ok:
                 print(f"[PHASE] process_day_end: trial resolve failed for chat_id={chat_id}, info={info}")
-                await bot.send_message(chat_id, info)
+                await safe_send_message(bot, chat_id, info)
                 return
 
             if eliminated:
                 first = eliminated[0]
                 role_text = role_mark_text(first.role)
                 first_mark = player_profile_link(first)
-                await bot.send_message(
+                await safe_send_message(
+                    bot,
                     chat_id,
                     f"Результаты голосования:\n{yes_count} 👍 | {no_count} 👎\n\nВешаем {first_mark}! :)",
                 )
                 await asyncio.sleep(2)
-                await bot.send_message(chat_id, f"{first_mark} был {role_text}")
+                await safe_send_message(bot, chat_id, f"{first_mark} был {role_text}")
                 await asyncio.sleep(2)
                 try:
                     if first.role == ROLE_KAMIKAZE:
-                        await bot.send_message(
+                        await safe_send_message(
+                            bot,
                             first.user_id,
                             "Тебя линчевали на дневном собрании :(\nКого заберём с собой в могилу?",
                         )
                     else:
-                        await bot.send_message(
+                        await safe_send_message(
+                            bot,
                             first.user_id,
                             "Тебя линчевали на дневном голосовании.",
                         )
                 except Exception:
                     pass
                 if first.role == "Самоубийца":
-                    await bot.send_message(chat_id, "💀 <b>Самоубийца</b> выполнил личную цель победы.")
+                    await safe_send_message(bot, chat_id, "💀 <b>Самоубийца</b> выполнил личную цель победы.")
                 if first.role == "Камикадзе" and len(eliminated) > 1:
                     second = eliminated[1]
                     second_role = role_mark_text(second.role)
                     second_mark = player_profile_link(second)
-                    await bot.send_message(chat_id, f"💣 Камикадзе забрал с собой {second_mark} ({second_role}).")
+                    await safe_send_message(bot, chat_id, f"💣 Камикадзе забрал с собой {second_mark} ({second_role}).")
             else:
-                await bot.send_message(
+                await safe_send_message(
+                    bot,
                     chat_id,
                     "Мнения жителей разошлись\n"
                     f"({yes_count} 👍 | {no_count} 👎 )... Разошлись и сами жители, так никого и не повесив...",
@@ -1614,7 +1642,7 @@ async def process_day_end(bot: Bot, chat_id: int, timer_reason: str | None = Non
 
             if room.phase == PHASE_FINISHED:
                 ensure_stats_recorded(room)
-                await bot.send_message(chat_id, room.final_report_text())
+                await safe_send_message(bot, chat_id, room.final_report_text())
                 cancel_phase_timer(chat_id)
                 persist_room(room)
                 return
@@ -1628,7 +1656,8 @@ async def process_day_end(bot: Bot, chat_id: int, timer_reason: str | None = Non
                 NIGHT_IMAGE_PATH,
                 reply_markup=keyboard,
             )
-            await bot.send_message(
+            await safe_send_message(
+                bot,
                 chat_id,
                 night_status_text(room),
                 reply_markup=keyboard,
