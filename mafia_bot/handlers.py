@@ -347,6 +347,10 @@ async def launch_game_from_registration(bot: Bot, room, chat_id: int, chat_title
     room.close_registration()
     try:
         room.assign_roles()
+        print(
+            f"[DEBUG] launch_game_from_registration: chat_id={chat_id}, "
+            f"started={room.started}, phase={room.phase}, round_no={room.round_no}, players={len(room.players)}"
+        )
     except Exception as e:
         try:
             await bot.send_message(chat_id, f"Не удалось начать игру. Ошибка: {e!r}\nПопробуй /stop и создай лобби заново.")
@@ -503,6 +507,14 @@ async def process_registration_timeout(bot: Bot, chat_id: int) -> None:
         return
 
     refreshed = storage.get_room(chat_id)
+    print(
+        f"[DEBUG] process_registration_timeout post-launch: chat_id={chat_id}, "
+        f"room_exists={refreshed is not None}, "
+        f"started={getattr(refreshed, 'started', None)}, "
+        f"phase={getattr(refreshed, 'phase', None)}, "
+        f"registration_open={getattr(refreshed, 'registration_open', None)}, "
+        f"players={len(refreshed.players) if refreshed is not None else None}"
+    )
     if refreshed is None or not refreshed.started or refreshed.phase != PHASE_NIGHT:
         try:
             await bot.send_message(
