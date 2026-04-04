@@ -202,7 +202,9 @@ class GameRoom:
     day_silenced_user_id: int | None = None
     doctor_target_id: int | None = None
     doctor_self_heal_used: bool = False
+    commissar_action_mode: str | None = None
     commissar_target_id: int | None = None
+    commissar_shot_target_id: int | None = None
     advocate_target_id: int | None = None
     maniac_target_id: int | None = None
     mistress_target_id: int | None = None
@@ -256,7 +258,10 @@ class GameRoom:
         self.night_kill_sources.clear()
         self.day_silenced_user_id = None
         self.doctor_target_id = None
+        self.doctor_self_heal_used = False
+        self.commissar_action_mode = None
         self.commissar_target_id = None
+        self.commissar_shot_target_id = None
         self.advocate_target_id = None
         self.maniac_target_id = None
         self.mistress_target_id = None
@@ -308,7 +313,9 @@ class GameRoom:
         self.day_silenced_user_id = None
         self.doctor_target_id = None
         self.doctor_self_heal_used = False
+        self.commissar_action_mode = None
         self.commissar_target_id = None
+        self.commissar_shot_target_id = None
         self.advocate_target_id = None
         self.maniac_target_id = None
         self.mistress_target_id = None
@@ -451,6 +458,7 @@ class GameRoom:
 
         if maniac_count == 1 and len(alive) == 1:
             self.phase = PHASE_FINISHED
+            self.started = False
             self.winner_team = "Маньяк"
             self.finished_at = datetime.now()
             return "Маньяк"
@@ -461,18 +469,21 @@ class GameRoom:
             non_maniac = next((p for p in alive if p.role != ROLE_MANIAC), None)
             if non_maniac is not None and non_maniac.role == ROLE_CITIZEN:
                 self.phase = PHASE_FINISHED
+                self.started = False
                 self.winner_team = "Маньяк"
                 self.finished_at = datetime.now()
                 return "Маньяк"
 
         if mafia_count == 0 and maniac_count == 0:
             self.phase = PHASE_FINISHED
+            self.started = False
             self.winner_team = "Мирные жители"
             self.finished_at = datetime.now()
             return "Мирные"
 
         if mafia_count > 0 and maniac_count == 0 and mafia_count >= civ_count:
             self.phase = PHASE_FINISHED
+            self.started = False
             self.winner_team = "Мафия"
             self.finished_at = datetime.now()
             return "Мафия"
@@ -535,8 +546,16 @@ class GameRoom:
             return False
 
         commissar_alive = any(p.alive and p.role == ROLE_COMMISSAR for p in self.players.values())
-        if commissar_alive and self.commissar_target_id is None:
-            return False
+        if commissar_alive:
+            if self.round_no >= 2:
+                if self.commissar_action_mode is None:
+                    return False
+                if self.commissar_action_mode == "check" and self.commissar_target_id is None:
+                    return False
+                if self.commissar_action_mode == "shoot" and self.commissar_shot_target_id is None:
+                    return False
+            elif self.commissar_target_id is None:
+                return False
 
         advocate_alive = any(p.alive and p.role == ROLE_ADVOCATE for p in self.players.values())
         if advocate_alive and self.advocate_target_id is None:
@@ -661,7 +680,9 @@ class GameRoom:
         self.night_kill_sources.clear()
         self.day_silenced_user_id = None
         self.doctor_target_id = None
+        self.commissar_action_mode = None
         self.commissar_target_id = None
+        self.commissar_shot_target_id = None
         self.advocate_target_id = None
         self.maniac_target_id = None
         self.mistress_target_id = None
@@ -854,6 +875,14 @@ class GameRoom:
         if commissar.role != ROLE_COMMISSAR:
             return False, "Проверять может только комиссар."
 
+        if self.round_no >= 2:
+            if self.commissar_action_mode is None:
+                return False, "Сначала выбери: проверить или стрелять."
+            if self.commissar_action_mode != "check":
+                return False, "На эту ночь уже выбран режим стрельбы."
+        else:
+            self.commissar_action_mode = "check"
+
         if not target.alive:
             return False, "Цель уже выбыла."
         if target.user_id == commissar.user_id:
@@ -861,6 +890,53 @@ class GameRoom:
 
         self.commissar_target_id = target_user_id
         return True, "Проверка принята. Результат будет утром."
+
+    def set_commissar_action_mode(self, commissar_user_id: int, mode: str) -> tuple[bool, str]:
+        if self.phase != PHASE_NIGHT:
+            return False, "Сейчас не ночь."
+        if self.round_no < 2:
+            return False, "Стрелять можно только со второй ночи."
+
+        commissar = self.get_player(commissar_user_id)
+        if commissar is None:
+            return False, "Игрок не найден."
+        if not commissar.alive:
+            return False, "Ты выбыл из игры."
+        if commissar.role != ROLE_COMMISSAR:
+            return False, "Это действие доступно только комиссару."
+        if mode not in {"check", "shoot"}:
+            return False, "Некорректный режим действия."
+
+        self.commissar_action_mode = mode
+        self.commissar_target_id = None
+        self.commissar_shot_target_id = None
+        if mode == "shoot":
+            return True, "Режим выбран: стрелять."
+        return True, "Режим выбран: проверять."
+
+    def set_commissar_shot_target(self, commissar_user_id: int, target_user_id: int) -> tuple[bool, str]:
+        if self.phase != PHASE_NIGHT:
+            return False, "Сейчас не ночь."
+        if self.round_no < 2:
+            return False, "Стрелять можно только со второй ночи."
+        if self.commissar_action_mode != "shoot":
+            return False, "Сначала выбери режим стрельбы."
+
+        commissar = self.get_player(commissar_user_id)
+        target = self.get_player(target_user_id)
+        if commissar is None or target is None:
+            return False, "Игрок не найден."
+        if not commissar.alive:
+            return False, "Ты выбыл из игры."
+        if commissar.role != ROLE_COMMISSAR:
+            return False, "Стрелять может только комиссар."
+        if not target.alive:
+            return False, "Цель уже выбыла."
+        if target.user_id == commissar.user_id:
+            return False, "Нельзя выбрать себя."
+
+        self.commissar_shot_target_id = target_user_id
+        return True, "Комиссар выбрал цель для выстрела."
 
     def set_advocate_target(self, advocate_user_id: int, target_user_id: int) -> tuple[bool, str]:
         if self.phase != PHASE_NIGHT:
@@ -943,8 +1019,19 @@ class GameRoom:
             if protected_target is not None and protected_target.alive:
                 advocate_target_id = protected_target.user_id
 
-        if commissar is not None and self.commissar_target_id is not None:
-            checked = self.get_player(self.commissar_target_id)
+        commissar_check_target_id: int | None = None
+        commissar_shot_target_id: int | None = None
+        if commissar is not None:
+            if self.round_no >= 2:
+                if self.commissar_action_mode == "check":
+                    commissar_check_target_id = self.commissar_target_id
+                elif self.commissar_action_mode == "shoot":
+                    commissar_shot_target_id = self.commissar_shot_target_id
+            else:
+                commissar_check_target_id = self.commissar_target_id
+
+        if commissar is not None and commissar_check_target_id is not None:
+            checked = self.get_player(commissar_check_target_id)
             if checked is not None and checked.alive:
                 self.add_night_report_line(checked.user_id, "Ночью тебя проверял 🕵️ Комиссар Каттани.")
                 mafia_checked = checked.role in MAFIA_ROLES
@@ -971,6 +1058,8 @@ class GameRoom:
             attacks.setdefault(mafia_target_id, []).append("мафия")
         if maniac_target_id is not None:
             attacks.setdefault(maniac_target_id, []).append("маньяк")
+        if commissar_shot_target_id is not None:
+            attacks.setdefault(commissar_shot_target_id, []).append("комиссар")
         if self.kamikaze_pending_user_id is not None and self.kamikaze_target_id is not None:
             attacks.setdefault(self.kamikaze_target_id, []).append("камикадзе")
 
@@ -1038,7 +1127,9 @@ class GameRoom:
 
                 if doctor_target_id == observed.user_id and doctor is not None:
                     add_visitor(doctor.user_id)
-                if self.commissar_target_id == observed.user_id and commissar is not None:
+                if commissar_check_target_id == observed.user_id and commissar is not None:
+                    add_visitor(commissar.user_id)
+                if commissar_shot_target_id == observed.user_id and commissar is not None:
                     add_visitor(commissar.user_id)
                 if maniac_target_id == observed.user_id and maniac is not None:
                     add_visitor(maniac.user_id)
@@ -1098,7 +1189,9 @@ class GameRoom:
         self.trial_candidate_id = None
         self.trial_votes.clear()
         self.doctor_target_id = None
+        self.commissar_action_mode = None
         self.commissar_target_id = None
+        self.commissar_shot_target_id = None
         self.advocate_target_id = None
         self.maniac_target_id = None
         self.mistress_last_target_id = mistress_target_id

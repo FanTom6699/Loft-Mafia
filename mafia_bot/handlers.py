@@ -231,8 +231,16 @@ def night_skipped_user_ids(room) -> list[int]:
             skipped.append(player.user_id)
         elif player.role == "Доктор" and room.doctor_target_id is None:
             skipped.append(player.user_id)
-        elif player.role == "Комиссар Каттани" and room.commissar_target_id is None:
-            skipped.append(player.user_id)
+        elif player.role == "Комиссар Каттани":
+            if room.round_no >= 2:
+                if room.commissar_action_mode is None:
+                    skipped.append(player.user_id)
+                elif room.commissar_action_mode == "check" and room.commissar_target_id is None:
+                    skipped.append(player.user_id)
+                elif room.commissar_action_mode == "shoot" and room.commissar_shot_target_id is None:
+                    skipped.append(player.user_id)
+            elif room.commissar_target_id is None:
+                skipped.append(player.user_id)
         elif player.role == ROLE_ADVOCATE and room.advocate_target_id is None:
             skipped.append(player.user_id)
         elif player.role == "Маньяк" and room.maniac_target_id is None:
@@ -277,6 +285,8 @@ def format_killer_sources_text(sources: list[str]) -> str:
             labels.append(role_mark_text(ROLE_DON))
         elif source == "маньяк":
             labels.append(role_mark_text(ROLE_MANIAC))
+        elif source == "комиссар":
+            labels.append(role_mark_text(ROLE_COMMISSAR))
         elif source == "камикадзе":
             labels.append(role_mark_text(ROLE_KAMIKAZE))
         else:
@@ -448,8 +458,8 @@ async def process_registration_timeout(bot: Bot, chat_id: int) -> None:
     if room is None:
         print(f"[ERROR] process_registration_timeout: room is None for chat_id={chat_id}")
         return
-    if room.started or not room.registration_open:
-        print(f"[ERROR] process_registration_timeout: already started or registration closed for chat_id={chat_id}")
+    if room.started:
+        print(f"[ERROR] process_registration_timeout: already started for chat_id={chat_id}")
         return
 
     if len(room.players) < MIN_PLAYERS:
@@ -887,6 +897,8 @@ def selected_target_for_actor(room, actor_user_id: int) -> int | None:
         if actor.role == "Доктор":
             return room.doctor_target_id
         if actor.role == "Комиссар Каттани":
+            if room.commissar_action_mode == "shoot":
+                return room.commissar_shot_target_id
             return room.commissar_target_id
         if actor.role == ROLE_ADVOCATE:
             return room.advocate_target_id
@@ -961,15 +973,43 @@ def build_action_keyboard(room, actor_user_id: int) -> InlineKeyboardMarkup | No
                     ]
                 )
         if actor.role == "Комиссар Каттани":
-            for target in alive_targets:
+            if room.round_no >= 2 and room.commissar_action_mode is None:
                 rows.append(
                     [
                         InlineKeyboardButton(
-                            text=mark(target_label(target), target.user_id),
-                            callback_data=f"act:check:{room.chat_id}:{target.user_id}",
+                            text="Проверить",
+                            callback_data=f"act:commode:{room.chat_id}:1",
                         )
                     ]
                 )
+                rows.append(
+                    [
+                        InlineKeyboardButton(
+                            text="Стрелять",
+                            callback_data=f"act:commode:{room.chat_id}:2",
+                        )
+                    ]
+                )
+            elif room.round_no >= 2 and room.commissar_action_mode == "shoot":
+                for target in alive_targets:
+                    rows.append(
+                        [
+                            InlineKeyboardButton(
+                                text=mark(target_label(target), target.user_id),
+                                callback_data=f"act:cshot:{room.chat_id}:{target.user_id}",
+                            )
+                        ]
+                    )
+            else:
+                for target in alive_targets:
+                    rows.append(
+                        [
+                            InlineKeyboardButton(
+                                text=mark(target_label(target), target.user_id),
+                                callback_data=f"act:check:{room.chat_id}:{target.user_id}",
+                            )
+                        ]
+                    )
         if actor.role == ROLE_ADVOCATE:
             for target in room.alive_players():
                 rows.append(
@@ -1078,6 +1118,11 @@ def build_action_prompt_text(room, actor_user_id: int) -> str:
         if actor.role == ROLE_ADVOCATE:
             return "<b>Кого будем защищать от правосудия?</b>"
         if actor.role == ROLE_COMMISSAR:
+            if room.round_no >= 2:
+                if room.commissar_action_mode is None:
+                    return "<b>Проверить или стрелять?</b>"
+                if room.commissar_action_mode == "shoot":
+                    return "<b>Кого будем убивать?</b>"
             return "<b>Кого будем проверять?</b>"
         return "Сейчас у твоей роли нет активных ночных действий."
 
@@ -1509,7 +1554,9 @@ async def process_day_end(bot: Bot, chat_id: int, timer_reason: str | None = Non
                     chat_id,
                     f"Результаты голосования:\n{yes_count} 👍 | {no_count} 👎\n\nВешаем {first_mark}! :)",
                 )
+                await asyncio.sleep(2)
                 await bot.send_message(chat_id, f"{first_mark} был {role_text}")
+                await asyncio.sleep(2)
                 try:
                     if first.role == ROLE_KAMIKAZE:
                         await bot.send_message(
@@ -1549,6 +1596,7 @@ async def process_day_end(bot: Bot, chat_id: int, timer_reason: str | None = Non
                 persist_room(room)
                 return
 
+            await asyncio.sleep(2)
             keyboard = await night_action_keyboard(bot)
             await send_phase_media(
                 bot,
@@ -2414,6 +2462,27 @@ async def on_action_callback(callback: CallbackQuery) -> None:
             persist_room(room)
         return
 
+    if action == "commode":
+        if room.round_no < 2:
+            await callback.answer("Стрелять можно только со второй ночи.", show_alert=True)
+            return
+        if room.commissar_target_id is not None or room.commissar_shot_target_id is not None:
+            await callback.answer("Выбор уже зафиксирован до конца ночи.", show_alert=True)
+            return
+
+        mode = "check" if target_id == 1 else "shoot" if target_id == 2 else None
+        if mode is None:
+            await callback.answer("Некорректный выбор действия.", show_alert=True)
+            return
+        ok, info = room.set_commissar_action_mode(callback.from_user.id, mode)
+        await callback.answer(info, show_alert=not ok)
+        if ok:
+            if mode == "shoot":
+                await callback.bot.send_message(room.chat_id, "🕵️‍ Комиссар Каттани уже зарядил свой пистолет...")
+            await refresh_private_action_message(callback, room, callback.from_user.id)
+            persist_room(room)
+        return
+
     if action == "check":
         if room.commissar_target_id is not None:
             await callback.answer("Выбор уже зафиксирован до конца ночи.", show_alert=True)
@@ -2423,6 +2492,27 @@ async def on_action_callback(callback: CallbackQuery) -> None:
         if ok:
             target = room.get_player(target_id)
             await announce_night_role_once(actor.role)
+            if target is not None:
+                selected_name = player_display_name(target)
+                selected_user_id = target.user_id
+            else:
+                selected_name = "цель"
+                selected_user_id = None
+            await callback.message.edit_text(
+                locked_choice_text(room, callback.from_user.id, selected_name, selected_user_id),
+            )
+            await maybe_finish_phase_early(callback.bot, room)
+            persist_room(room)
+        return
+
+    if action == "cshot":
+        if room.commissar_shot_target_id is not None:
+            await callback.answer("Выбор уже зафиксирован до конца ночи.", show_alert=True)
+            return
+        ok, info = room.set_commissar_shot_target(callback.from_user.id, target_id)
+        await callback.answer(info, show_alert=not ok)
+        if ok:
+            target = room.get_player(target_id)
             if target is not None:
                 selected_name = player_display_name(target)
                 selected_user_id = target.user_id
