@@ -1430,8 +1430,8 @@ async def prompt_last_words(bot: Bot, room, eliminated) -> None:
             await bot.send_message(
                 user_id,
                 (
-                    "Тебя убили. Ты можешь оставить предсмертное сообщение.\n"
-                    "Отправь один текст в ответ, и бот передаст его в группу."
+                    "<b>Тебя убили :(</b>\n"
+                    "Ты можешь отправить сюда своё предсмертное сообщение"
                 ),
             )
         except Exception:
@@ -1449,7 +1449,7 @@ def compact_night_report_messages(lines: list[str]) -> list[str]:
         next_line = lines[i + 1] if i + 1 < len(lines) else None
 
         if current == "Тебя убили :(" and next_line == "Ты можешь отправить сюда своё предсмертное сообщение":
-            messages.append(f"{current}\n{next_line}")
+            messages.append(f"<b>{current}</b>\n{next_line}")
             i += 2
             continue
 
