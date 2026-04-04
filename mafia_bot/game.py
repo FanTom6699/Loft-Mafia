@@ -643,6 +643,10 @@ class GameRoom:
         if self.phase != PHASE_DAY or self.day_stage != DAY_STAGE_NOMINATION:
             return False, None
 
+        eligible_voter_ids = {p.user_id for p in self.alive_players()}
+        if self.day_silenced_user_id is not None:
+            eligible_voter_ids.discard(self.day_silenced_user_id)
+
         if not self.day_votes:
             return True, None
 
@@ -657,6 +661,11 @@ class GameRoom:
             return True, None
 
         max_votes = max(votes_by_target.values())
+        voted_ids = {user_id for user_id in self.day_votes if user_id in eligible_voter_ids}
+        skipped_count = len(eligible_voter_ids - voted_ids)
+        if skipped_count > max_votes:
+            return True, None
+
         leaders = [target_id for target_id, count in votes_by_target.items() if count == max_votes]
         if len(leaders) != 1:
             return True, None
