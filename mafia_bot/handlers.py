@@ -3200,7 +3200,6 @@ async def enforce_group_game_rules(message: Message) -> None:
         [
             bool(message.photo),
             message.video is not None,
-            message.sticker is not None,
             message.animation is not None,
             message.audio is not None,
             message.document is not None,
