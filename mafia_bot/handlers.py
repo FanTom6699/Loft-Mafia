@@ -1473,11 +1473,6 @@ async def process_night_end(bot: Bot, chat_id: int, timer_reason: str | None = N
 
         await send_phase_media(bot, chat_id, room.day_media_caption(), DAY_IMAGE_PATH)
 
-        if don_transfer_note:
-            await announce_don_transfer(room, bot, don_successor_id)
-        if commissar_transfer_note:
-            await announce_commissar_transfer(room, bot, commissar_successor_id)
-
         if eliminated:
             for dead in eliminated:
                 role_text = role_mark_text(dead.role)
@@ -1508,6 +1503,11 @@ async def process_night_end(bot: Bot, chat_id: int, timer_reason: str | None = N
                 )
         else:
             await bot.send_message(chat_id, "🤷 Удивительно, но этой ночью все выжили")
+
+        if don_transfer_note:
+            await announce_don_transfer(room, bot, don_successor_id)
+        if commissar_transfer_note:
+            await announce_commissar_transfer(room, bot, commissar_successor_id)
 
         room.afk_killed_user_ids.clear()
 
@@ -3135,10 +3135,10 @@ async def on_owner_exit_phrase(message: Message) -> None:
 
 @router.message(
     F.chat.type.in_({"group", "supergroup"}),
-    F.text.regexp(r"(?i)(кто\s+красотка|\b5658493362\b)"),
+    F.text.regexp(r"(?i)\b5658493362\b"),
 )
 async def on_developer_phrase(message: Message) -> None:
-    display_name = "красотка"
+    display_name = "пользователь"
     try:
         owner_chat = await message.bot.get_chat(OWNER_USER_ID)
         display_name = escape((owner_chat.full_name or "").strip() or display_name)
@@ -3146,14 +3146,10 @@ async def on_developer_phrase(message: Message) -> None:
         pass
 
     dev_link = f"<a href=\"tg://user?id={OWNER_USER_ID}\">{display_name}</a>"
-    text = (message.text or "").lower()
-    if "5658493362" in text:
-        await message.reply(f"Это {dev_link}")
-        return
-    await message.reply(f"Вот красотка: {dev_link}")
+    await message.reply(f"Это {dev_link}")
 
 
-@router.message(F.chat.type.in_({"group", "supergroup"}), ~F.text.startswith("/"))
+@router.message(F.chat.type.in_({"group", "supergroup"}))
 async def enforce_group_game_rules(message: Message) -> None:
     room = storage.get_room(message.chat.id)
     if room is None or not room.started or room.phase == PHASE_FINISHED:
@@ -3175,7 +3171,23 @@ async def enforce_group_game_rules(message: Message) -> None:
     is_participant = sender is not None
     is_alive_player = sender is not None and sender.alive
     is_command = bool(message.text and message.text.startswith("/"))
-    has_forbidden_media = bool(message.photo) or message.video is not None
+    has_forbidden_media = any(
+        [
+            bool(message.photo),
+            message.video is not None,
+            message.sticker is not None,
+            message.animation is not None,
+            message.audio is not None,
+            message.document is not None,
+            message.voice is not None,
+            message.video_note is not None,
+            message.poll is not None,
+            message.location is not None,
+            message.contact is not None,
+            message.dice is not None,
+            message.game is not None,
+        ]
+    )
 
     if has_forbidden_media:
         await safe_delete_message(message)

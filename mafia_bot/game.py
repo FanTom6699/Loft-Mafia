@@ -1174,8 +1174,6 @@ class GameRoom:
             observed = self.get_player(self.bum_target_id)
             if observed is not None:
                 observed_name = (observed.full_name or "").strip() or f"Игрок {observed.user_id}"
-                if observed.alive:
-                    self.add_night_report_line(observed.user_id, "Ночью рядом с тобой крутился 🧥 Бомж.")
                 visitors: list[Player] = []
                 seen_ids: set[int] = set()
 
