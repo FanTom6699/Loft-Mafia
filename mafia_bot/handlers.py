@@ -986,6 +986,23 @@ def build_action_keyboard(room, actor_user_id: int) -> InlineKeyboardMarkup | No
     if actor is None:
         return None
 
+    if (
+        room.phase == PHASE_DAY
+        and room.day_stage == DAY_STAGE_NOMINATION
+        and room.day_silenced_user_id is not None
+        and actor.user_id == room.day_silenced_user_id
+    ):
+        return InlineKeyboardMarkup(
+            inline_keyboard=[
+                [
+                    InlineKeyboardButton(
+                        text="Ты под действием Любовницы",
+                        callback_data="noop:silenced",
+                    )
+                ]
+            ]
+        )
+
     kamikaze_revenge_mode = (
         room.phase == PHASE_NIGHT
         and actor.role == ROLE_KAMIKAZE
@@ -1191,6 +1208,8 @@ def build_action_prompt_text(room, actor_user_id: int) -> str:
         return "Сейчас у твоей роли нет активных ночных действий."
 
     if room.phase == "day" and room.day_stage == DAY_STAGE_NOMINATION:
+        if room.day_silenced_user_id is not None and actor.user_id == room.day_silenced_user_id:
+            return "Ты под действием Любовницы и не можешь голосовать сегодня."
         return "Пришло время искать виноватых!\nКого ты хочешь линчевать?"
 
     return "Выбери действие на текущую фазу:"
@@ -2817,6 +2836,9 @@ async def on_action_callback(callback: CallbackQuery) -> None:
         if voter is None or not voter.alive:
             await callback.answer("Ты не можешь голосовать на этом этапе.", show_alert=True)
             return
+        if room.day_silenced_user_id is not None and voter.user_id == room.day_silenced_user_id:
+            await callback.answer("Ты не можешь голосовать под действием Любовницы.", show_alert=True)
+            return
 
         room.day_votes[callback.from_user.id] = 0
         await callback.answer("Пропуск голосования принят.")
@@ -2932,6 +2954,9 @@ async def on_noop_callback(callback: CallbackQuery) -> None:
         return
     if callback.data.startswith("noop:skip:"):
         await callback.answer("Ты опоздал...", show_alert=True)
+        return
+    if callback.data == "noop:silenced":
+        await callback.answer("Ты не можешь голосовать под действием Любовницы.", show_alert=True)
         return
     await callback.answer("Этап уже закрыт. Вы пропустили ход.", show_alert=True)
 

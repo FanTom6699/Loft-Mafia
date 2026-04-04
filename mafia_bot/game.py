@@ -594,6 +594,8 @@ class GameRoom:
             return False
 
         alive_ids = {p.user_id for p in self.alive_players()}
+        if self.day_silenced_user_id is not None:
+            alive_ids.discard(self.day_silenced_user_id)
         if not alive_ids:
             return False
 
@@ -605,6 +607,8 @@ class GameRoom:
             return False
 
         alive_ids = {p.user_id for p in self.alive_players()}
+        if self.day_silenced_user_id is not None:
+            alive_ids.discard(self.day_silenced_user_id)
         if self.trial_candidate_id is not None:
             alive_ids.discard(self.trial_candidate_id)
         if not alive_ids:
@@ -668,6 +672,8 @@ class GameRoom:
             return False, "Игрок не найден."
         if not voter.alive:
             return False, "Ты выбыл из игры."
+        if self.day_silenced_user_id is not None and voter.user_id == self.day_silenced_user_id:
+            return False, "Ты не можешь голосовать под действием Любовницы."
         if self.trial_candidate_id is not None and voter.user_id == self.trial_candidate_id:
             return False, "Кандидат на повешение не может голосовать за/против."
 
@@ -1419,6 +1425,8 @@ class GameRoom:
             return False, "Игрок не найден."
         if not voter.alive:
             return False, "Ты выбыл из игры."
+        if self.day_silenced_user_id is not None and voter.user_id == self.day_silenced_user_id:
+            return False, "Ты не можешь голосовать под действием Любовницы."
         if not target.alive:
             return False, "Цель уже выбыла."
         if voter.user_id == target.user_id:
