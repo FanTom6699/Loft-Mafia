@@ -612,6 +612,11 @@ async def safe_delete_message(message: Message) -> None:
         return
 
 
+async def cleanup_group_command_message(message: Message) -> None:
+    if message.chat.type in {"group", "supergroup"}:
+        await safe_delete_message(message)
+
+
 def get_or_create_penalty(chat_id: int, user_id: int) -> dict[str, float | int | bool]:
     by_chat = chat_penalties.setdefault(chat_id, {})
     state = by_chat.get(user_id)
@@ -1858,25 +1863,22 @@ def city_power_allies_text(room, role: str) -> str:
 
 
 def role_card_for_player(room, player, chat_title: str) -> str:
-    title_line = f"Ты присоединился к игре в <b>{escape(chat_title)}</b>."
-
     if player.role == ROLE_SERGEANT:
         base = (
             "<b>Ты - 👮🏼‍♂️ Сержант!</b>\n"
             "Помощник комиссара Каттани. Он будет информировать тебя о своих действиях "
             "и держать в курсе событий. Если комиссар погибнет - ты займёшь его место."
         )
-        return title_line + "\n\n" + base + city_power_allies_text(room, ROLE_SERGEANT)
+        return base + city_power_allies_text(room, ROLE_SERGEANT)
 
     if player.role == ROLE_COMMISSAR:
         base = (
             "<b>Ты - 🕵️‍ Комиссар Каттани!</b>\n"
             "Главный городской защитник и гроза мафии..."
         )
-        return title_line + "\n\n" + base + city_power_allies_text(room, ROLE_COMMISSAR)
+        return base + city_power_allies_text(room, ROLE_COMMISSAR)
 
     card_text = role_card_text(player.role, chat_title)
-    card_text = title_line + "\n\n" + card_text
     if player.role in {ROLE_DON, ROLE_MAFIA}:
         card_text += mafia_allies_text(room)
     return card_text
@@ -1962,6 +1964,7 @@ async def cmd_start(message: Message, command: CommandObject) -> None:
 
 @router.message(Command("roles"))
 async def cmd_roles(message: Message) -> None:
+    await cleanup_group_command_message(message)
     if message.chat.type == "private":
         await message.answer("Выберите роль:", reply_markup=private_roles_keyboard())
         return
@@ -1970,6 +1973,7 @@ async def cmd_roles(message: Message) -> None:
 
 @router.message(Command("stats"))
 async def cmd_stats(message: Message) -> None:
+    await cleanup_group_command_message(message)
     stats = repo.get_player_stats(message.from_user.id)
     if stats is None:
         if message.chat.type == "private":
@@ -1988,16 +1992,19 @@ async def cmd_stats(message: Message) -> None:
 
 @router.message(Command("profile"))
 async def cmd_profile(message: Message) -> None:
+    await cleanup_group_command_message(message)
     await message.answer("Профиль отключен. Используй меню ролей и статистики.")
 
 
 @router.message(Command("action"))
 async def cmd_action(message: Message) -> None:
+    await cleanup_group_command_message(message)
     await message.answer("Меню хода отправляется автоматически при старте каждой фазы.")
 
 
 @router.message(Command("panel"))
 async def cmd_panel(message: Message) -> None:
+    await cleanup_group_command_message(message)
     if message.chat.type == "private":
         await message.answer("Панель доступна в групповом чате.")
         return
@@ -2007,6 +2014,7 @@ async def cmd_panel(message: Message) -> None:
 
 @router.message(Command("game"))
 async def cmd_create(message: Message) -> None:
+    await cleanup_group_command_message(message)
     if message.chat.type == "private":
         await message.answer("Создавай лобби в групповом чате.")
         return
@@ -2078,11 +2086,13 @@ async def cmd_create(message: Message) -> None:
 
 @router.message(Command("join"))
 async def cmd_join(message: Message) -> None:
+    await cleanup_group_command_message(message)
     await message.answer("Вход в лобби только через inline-кнопку Зарегистрироваться под постом лобби.")
 
 
 @router.message(Command("leave"))
 async def cmd_leave(message: Message) -> None:
+    await cleanup_group_command_message(message)
     room = storage.get_room(message.chat.id)
     if room is None:
         await message.answer("Лобби не найдено.")
@@ -2109,6 +2119,7 @@ async def cmd_leave(message: Message) -> None:
 
 @router.message(Command("lobby"))
 async def cmd_lobby(message: Message) -> None:
+    await cleanup_group_command_message(message)
     room = storage.get_room(message.chat.id)
     if room is None:
         await message.answer("Лобби не найдено.")
@@ -2119,6 +2130,7 @@ async def cmd_lobby(message: Message) -> None:
 
 @router.message(Command("extend"))
 async def cmd_extend(message: Message) -> None:
+    await cleanup_group_command_message(message)
     room = storage.get_room(message.chat.id)
     if room is None:
         await message.answer("Лобби не найдено.")
@@ -2149,6 +2161,7 @@ async def cmd_extend(message: Message) -> None:
 
 @router.message(Command("start"))
 async def cmd_begin(message: Message) -> None:
+    await cleanup_group_command_message(message)
     room = storage.get_room(message.chat.id)
     if room is None:
         await message.answer("Лобби не найдено.")
@@ -2205,6 +2218,12 @@ async def on_registration_action(callback: CallbackQuery) -> None:
         return
 
     if action == "join":
+        if not repo.has_private_user(callback.from_user.id):
+            await callback.answer(
+                "Сначала напиши боту в личку /start, затем вернись и нажми регистрацию еще раз.",
+                show_alert=True,
+            )
+            return
         if is_user_blocked(chat_id, callback.from_user.id):
             await notify_registration_blocked(callback.bot, chat_id, callback.from_user.id)
             await callback.answer("Пока действует мут, регистрация недоступна.", show_alert=True)
@@ -2302,6 +2321,7 @@ async def on_registration_action(callback: CallbackQuery) -> None:
 
 @router.message(Command("status"))
 async def cmd_status(message: Message) -> None:
+    await cleanup_group_command_message(message)
     room = storage.get_room(message.chat.id)
     if room is None:
         await message.answer("Лобби не найдено.")
@@ -2312,21 +2332,25 @@ async def cmd_status(message: Message) -> None:
 
 @router.message(Command("kill"))
 async def cmd_kill(message: Message) -> None:
+    await cleanup_group_command_message(message)
     await send_action_menu(message)
 
 
 @router.message(Command("heal"))
 async def cmd_heal(message: Message) -> None:
+    await cleanup_group_command_message(message)
     await send_action_menu(message)
 
 
 @router.message(Command("check"))
 async def cmd_check(message: Message) -> None:
+    await cleanup_group_command_message(message)
     await send_action_menu(message)
 
 
 @router.message(Command("night_end"))
 async def cmd_night_end(message: Message) -> None:
+    await cleanup_group_command_message(message)
     room = storage.get_room(message.chat.id)
     if room is None:
         await message.answer("Лобби не найдено.")
@@ -2337,11 +2361,13 @@ async def cmd_night_end(message: Message) -> None:
 
 @router.message(Command("vote"))
 async def cmd_vote(message: Message) -> None:
+    await cleanup_group_command_message(message)
     await send_action_menu(message)
 
 
 @router.message(Command("day_end"))
 async def cmd_day_end(message: Message) -> None:
+    await cleanup_group_command_message(message)
     room = storage.get_room(message.chat.id)
     if room is None:
         await message.answer("Лобби не найдено.")
@@ -2487,6 +2513,8 @@ async def on_action_callback(callback: CallbackQuery) -> None:
 
     async def announce_night_role_once(role_name: str) -> None:
         if room.phase != "night":
+            return
+        if role_name == ROLE_KAMIKAZE:
             return
         if not room.mark_night_role_announced(role_name):
             return
@@ -3018,6 +3046,7 @@ async def enforce_group_game_rules(message: Message) -> None:
 
 @router.message(Command("stop"))
 async def cmd_close(message: Message) -> None:
+    await cleanup_group_command_message(message)
     room = storage.get_room(message.chat.id)
     if room is None:
         await message.answer("Лобби не найдено.")

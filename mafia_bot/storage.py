@@ -335,6 +335,14 @@ class GameStateRepository:
             conn.commit()
         return False
 
+    def has_private_user(self, user_id: int) -> bool:
+        with sqlite3.connect(self.db_path) as conn:
+            row = conn.execute(
+                "SELECT 1 FROM private_users WHERE user_id = ?",
+                (user_id,),
+            ).fetchone()
+        return row is not None
+
     def save_room(self, room: GameRoom) -> None:
         payload = self._serialize_room(room)
         encoded = json.dumps(payload, ensure_ascii=False)
