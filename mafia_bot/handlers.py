@@ -2136,8 +2136,11 @@ async def cmd_leave(message: Message) -> None:
         persist_room(room)
         return
 
-    ok, info = room.remove_player(message.from_user.id)
-    await message.answer(info)
+    ok, _ = room.remove_player(message.from_user.id)
+    if not ok:
+        await message.answer("Тебя нет в этой игре.")
+        return
+
     if ok:
         persist_room(room)
 
@@ -2152,7 +2155,6 @@ async def cmd_leave(message: Message) -> None:
             pass
 
     if room.players:
-        await message.answer(room.lobby_text())
         await refresh_registration_post(message, room)
     else:
         await clear_registration_post(message.bot, room)
@@ -2162,7 +2164,6 @@ async def cmd_leave(message: Message) -> None:
         clear_action_menu_messages(message.chat.id)
         remove_room_state(message.chat.id)
         storage.close_room(message.chat.id)
-        await message.answer("Лобби пустое и закрыто.")
 
 
 @router.message(Command("lobby"))
