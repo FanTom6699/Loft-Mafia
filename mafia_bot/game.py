@@ -214,6 +214,8 @@ class GameRoom:
     bum_last_target_id: int | None = None
     kamikaze_pending_user_id: int | None = None
     kamikaze_target_id: int | None = None
+    night_missed_streaks: dict[int, int] = field(default_factory=dict)
+    afk_killed_user_ids: set[int] = field(default_factory=set)
     night_reports: dict[int, list[str]] = field(default_factory=dict)
     pending_last_words: set[int] = field(default_factory=set)
     used_last_words: set[int] = field(default_factory=set)
@@ -272,6 +274,8 @@ class GameRoom:
         self.bum_last_target_id = None
         self.kamikaze_pending_user_id = None
         self.kamikaze_target_id = None
+        self.night_missed_streaks.clear()
+        self.afk_killed_user_ids.clear()
         self.night_reports.clear()
         self.pending_last_words.clear()
         self.used_last_words.clear()
@@ -328,6 +332,8 @@ class GameRoom:
         self.bum_last_target_id = None
         self.kamikaze_pending_user_id = None
         self.kamikaze_target_id = None
+        self.night_missed_streaks.clear()
+        self.afk_killed_user_ids.clear()
         self.night_reports.clear()
         self.pending_last_words.clear()
         self.used_last_words.clear()
@@ -967,6 +973,7 @@ class GameRoom:
         if self.phase != PHASE_NIGHT:
             return False, "Сейчас не ночь.", [], None, None, None, None
 
+        self.afk_killed_user_ids.clear()
         self.night_reports.clear()
         self.last_doctor_saved_target_id = None
         self.day_silenced_user_id = None
@@ -1187,6 +1194,80 @@ class GameRoom:
                         self.add_night_report_line(healed_target.user_id, "Ты успешно вылечил себя!")
                     else:
                         self.add_night_report_line(healed_target.user_id, "👨🏼‍⚕️ Доктор вылечил тебя")
+
+        active_night_ids: set[int] = set()
+        acted_night_ids: set[int] = set()
+        for player in self.alive_players():
+            if player.role in MAFIA_ROLES:
+                active_night_ids.add(player.user_id)
+                if player.user_id in self.night_votes:
+                    acted_night_ids.add(player.user_id)
+            elif player.role == ROLE_DOCTOR:
+                active_night_ids.add(player.user_id)
+                if self.doctor_target_id is not None:
+                    acted_night_ids.add(player.user_id)
+            elif player.role == ROLE_COMMISSAR:
+                active_night_ids.add(player.user_id)
+                if self.round_no >= 2:
+                    if self.commissar_action_mode == "check" and self.commissar_target_id is not None:
+                        acted_night_ids.add(player.user_id)
+                    elif self.commissar_action_mode == "shoot" and self.commissar_shot_target_id is not None:
+                        acted_night_ids.add(player.user_id)
+                elif self.commissar_target_id is not None:
+                    acted_night_ids.add(player.user_id)
+            elif player.role == ROLE_ADVOCATE:
+                active_night_ids.add(player.user_id)
+                if self.advocate_target_id is not None:
+                    acted_night_ids.add(player.user_id)
+            elif player.role == ROLE_MANIAC:
+                active_night_ids.add(player.user_id)
+                if self.maniac_target_id is not None:
+                    acted_night_ids.add(player.user_id)
+            elif player.role == ROLE_MISTRESS:
+                active_night_ids.add(player.user_id)
+                if self.mistress_target_id is not None:
+                    acted_night_ids.add(player.user_id)
+            elif player.role == ROLE_BUM:
+                active_night_ids.add(player.user_id)
+                if self.bum_target_id is not None:
+                    acted_night_ids.add(player.user_id)
+
+        if self.kamikaze_pending_user_id is not None:
+            active_night_ids.add(self.kamikaze_pending_user_id)
+            if self.kamikaze_target_id is not None:
+                acted_night_ids.add(self.kamikaze_pending_user_id)
+
+        for user_id in list(self.night_missed_streaks.keys()):
+            if user_id not in active_night_ids:
+                self.night_missed_streaks.pop(user_id, None)
+
+        for user_id in active_night_ids:
+            if user_id in acted_night_ids:
+                self.night_missed_streaks[user_id] = 0
+                continue
+
+            streak = int(self.night_missed_streaks.get(user_id, 0)) + 1
+            self.night_missed_streaks[user_id] = streak
+            if streak < 2:
+                continue
+
+            player = self.get_player(user_id)
+            if player is None or not player.alive:
+                continue
+            player.alive = False
+            eliminated.append(player)
+            self.afk_killed_user_ids.add(player.user_id)
+            self.night_missed_streaks[player.user_id] = 0
+
+        if don_transfer_note is None and any(player.role == ROLE_DON for player in eliminated):
+            don_transfer_result = self.transfer_don_if_needed("гибели Дона из-за бездействия ночью")
+            if don_transfer_result is not None:
+                don_transfer_note, don_successor_id = don_transfer_result
+
+        if commissar_transfer_note is None and any(player.role == ROLE_COMMISSAR for player in eliminated):
+            commissar_transfer_result = self.transfer_commissar_if_needed()
+            if commissar_transfer_result is not None:
+                commissar_transfer_note, commissar_successor_id = commissar_transfer_result
 
         self.night_votes.clear()
         self.mafia_vote_locked = False

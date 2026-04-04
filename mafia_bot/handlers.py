@@ -231,7 +231,7 @@ def skipped_turn_keyboard(chat_id: int) -> InlineKeyboardMarkup:
         inline_keyboard=[
             [
                 InlineKeyboardButton(
-                    text="Вы пропустили ход",
+                    text="Ты опоздал...",
                     callback_data=f"noop:skip:{chat_id}",
                 )
             ]
@@ -299,14 +299,23 @@ async def mark_skipped_night_menus(bot: Bot, room, skipped_user_ids: list[int]) 
         message_id = get_action_menu_message_id(room.chat_id, user_id)
         if message_id is None:
             continue
+        skipped_text = f"{build_action_prompt_text(room, user_id)}\n\nТы опоздал..."
         try:
-            await bot.edit_message_reply_markup(
+            await bot.edit_message_text(
                 chat_id=user_id,
                 message_id=message_id,
+                text=skipped_text,
                 reply_markup=keyboard,
             )
         except Exception:
-            continue
+            try:
+                await bot.edit_message_reply_markup(
+                    chat_id=user_id,
+                    message_id=message_id,
+                    reply_markup=keyboard,
+                )
+            except Exception:
+                continue
 
 
 def format_killer_sources_text(sources: list[str]) -> str:
@@ -1419,8 +1428,12 @@ async def process_night_end(bot: Bot, chat_id: int, timer_reason: str | None = N
             except Exception as e:
                 print(f"[ERROR] process_night_end: failed to send timer_reason for chat_id={chat_id}, error={e!r}")
 
+        if mafia_alive_tonight and mafia_target_tonight is not None and not room.mafia_target_announced:
+            await safe_send_message(bot, chat_id, "🤵🏻 Мафия выбрала жертву...")
+
         reports = room.pop_night_reports()
         kill_sources = room.pop_night_kill_sources()
+        afk_killed_ids = set(room.afk_killed_user_ids)
         lucky_triggered = False
         for user_id, lines in reports.items():
             try:
@@ -1453,9 +1466,28 @@ async def process_night_end(bot: Bot, chat_id: int, timer_reason: str | None = N
                 if killer_text:
                     text += f"\n{killer_text}"
                 await bot.send_message(chat_id, text)
-            await prompt_last_words(bot, room, eliminated)
+            non_afk_eliminated = [player for player in eliminated if player.user_id not in afk_killed_ids]
+            await prompt_last_words(bot, room, non_afk_eliminated)
+
+            for dead in eliminated:
+                if dead.user_id not in afk_killed_ids:
+                    continue
+                try:
+                    await safe_send_message(bot, dead.user_id, "Ты бездействовал больше 2 ночей подряд и был убит...")
+                except Exception:
+                    pass
+                dead_mark = player_profile_link(dead)
+                await safe_send_message(
+                    bot,
+                    chat_id,
+                    "Кто-то из жителей слышал, как "
+                    f"{dead_mark} кричал перед смертью:\n"
+                    "Я больше не бу-у-у-у-ду спать во время игры-ы-ы-ы-ы-ы-!",
+                )
         else:
             await bot.send_message(chat_id, "🤷 Удивительно, но этой ночью все выжили")
+
+        room.afk_killed_user_ids.clear()
 
         day_summary = (
             room.alive_players_text()
@@ -1722,7 +1754,7 @@ async def phase_timer_worker(bot: Bot, chat_id: int, phase: str, duration_sec: i
             return
 
         if phase == "night":
-            await process_night_end(bot, chat_id, timer_reason="⏱ Время ночи вышло. Фаза закрыта автоматически.")
+            await process_night_end(bot, chat_id, timer_reason=None)
         elif phase == "day":
             await process_day_end(bot, chat_id, timer_reason=None)
     except asyncio.CancelledError:
@@ -1811,7 +1843,7 @@ async def restore_runtime_state(bot: Bot) -> None:
                     await process_night_end(
                         bot,
                         room.chat_id,
-                        timer_reason="⏱ Время ночи истекло во время перезапуска. Фаза закрыта автоматически."
+                        timer_reason=None
                     )
                 elif room.phase == PHASE_DAY:
                     await process_day_end(
@@ -2898,6 +2930,9 @@ async def on_noop_callback(callback: CallbackQuery) -> None:
         return
     if callback.data == "noop:locked":
         await callback.answer("Выбор уже зафиксирован.", show_alert=True)
+        return
+    if callback.data.startswith("noop:skip:"):
+        await callback.answer("Ты опоздал...", show_alert=True)
         return
     await callback.answer("Этап уже закрыт. Вы пропустили ход.", show_alert=True)
 

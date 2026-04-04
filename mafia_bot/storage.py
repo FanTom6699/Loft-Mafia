@@ -115,6 +115,8 @@ class GameStateRepository:
             "bum_last_target_id": room.bum_last_target_id,
             "kamikaze_pending_user_id": room.kamikaze_pending_user_id,
             "kamikaze_target_id": room.kamikaze_target_id,
+            "night_missed_streaks": room.night_missed_streaks,
+            "afk_killed_user_ids": sorted(room.afk_killed_user_ids),
             "night_reports": room.night_reports,
             "pending_last_words": sorted(room.pending_last_words),
             "used_last_words": sorted(room.used_last_words),
@@ -184,6 +186,11 @@ class GameStateRepository:
         room.bum_last_target_id = payload.get("bum_last_target_id")
         room.kamikaze_pending_user_id = payload.get("kamikaze_pending_user_id")
         room.kamikaze_target_id = payload.get("kamikaze_target_id")
+        room.night_missed_streaks = {
+            int(k): int(v)
+            for k, v in payload.get("night_missed_streaks", {}).items()
+        }
+        room.afk_killed_user_ids = {int(v) for v in payload.get("afk_killed_user_ids", [])}
 
         room.night_reports = {
             int(k): [str(line) for line in lines]
