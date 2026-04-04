@@ -55,7 +55,7 @@ def read_phase_seconds(name: str, default: int) -> int:
     return value if value > 0 else default
 
 
-NIGHT_PHASE_SECONDS = read_phase_seconds("NIGHT_PHASE_SECONDS", 90)
+NIGHT_PHASE_SECONDS = read_phase_seconds("NIGHT_PHASE_SECONDS", 60)
 DAY_DISCUSSION_SECONDS = read_phase_seconds("DAY_DISCUSSION_SECONDS", 60)
 DAY_NOMINATION_SECONDS = read_phase_seconds("DAY_NOMINATION_SECONDS", 60)
 DAY_TRIAL_SECONDS = read_phase_seconds("DAY_TRIAL_SECONDS", 60)
@@ -683,7 +683,7 @@ def registration_text(room) -> str:
         lines.append("Итого 0 чел.")
         return "\n".join(lines)
 
-    joined_names = ", ".join(player_display_name(player) for player in room.players.values())
+    joined_names = ", ".join(player_profile_link(player) for player in room.players.values())
     lines.append("Зарегистрировались::")
     lines.append(joined_names)
     lines.append("")
@@ -1336,11 +1336,8 @@ async def process_night_end(bot: Bot, chat_id: int, timer_reason: str | None = N
         kill_sources = room.pop_night_kill_sources()
         for user_id, lines in reports.items():
             try:
-                if len(lines) >= 3 and lines[0] == "Тебя убили :(" and lines[1] == "Ты можешь отправить сюда своё предсмертное сообщение" and lines[-1] in {"👨🏼‍⚕️ Доктор вылечил тебя", "Ты успешно вылечил себя!"}:
-                    await bot.send_message(user_id, "\n".join(lines[:-1]))
-                    await bot.send_message(user_id, lines[-1])
-                else:
-                    await bot.send_message(user_id, "\n".join(lines))
+                for line in lines:
+                    await bot.send_message(user_id, line)
             except Exception:
                 continue
 
@@ -2575,7 +2572,7 @@ async def on_action_callback(callback: CallbackQuery) -> None:
             if voter is not None and target is not None:
                 await callback.bot.send_message(
                     room.chat_id,
-                    f"{player_display_name(voter)} проголосовал за {player_display_name(target)}",
+                    f"{player_profile_link(voter)} проголосовал за {player_profile_link(target)}",
                 )
             await maybe_finish_phase_early(callback.bot, room)
             persist_room(room)
@@ -2605,7 +2602,7 @@ async def on_action_callback(callback: CallbackQuery) -> None:
         )
         await callback.bot.send_message(
             room.chat_id,
-            f"{player_display_name(voter)} пропускает голосование.",
+            f"{player_profile_link(voter)} пропускает голосование.",
         )
 
         await maybe_finish_phase_early(callback.bot, room)

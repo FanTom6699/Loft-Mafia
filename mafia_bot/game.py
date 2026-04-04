@@ -177,10 +177,11 @@ class GameRoom:
     host_id: int
 
     def commissar_check_result_text(self, checked_player) -> str:
-        # Возвращает явный текст роли для проверки комиссаром
         role = checked_player.role
         emoji = ROLE_EMOJI.get(role, "")
-        return f"🕵️ Результат проверки: {checked_player.full_name} - {emoji} <b>{role}</b>"
+        safe_name = escape((checked_player.full_name or "").strip() or f"Игрок {checked_player.user_id}")
+        name_link = f"<a href=\"tg://user?id={checked_player.user_id}\">{safe_name}</a>"
+        return f"{name_link} - {emoji} <b>{role}</b>"
     chat_title: str = ""
     players: dict[int, Player] = field(default_factory=dict)
     started: bool = False
@@ -1033,21 +1034,16 @@ class GameRoom:
         if commissar is not None and commissar_check_target_id is not None:
             checked = self.get_player(commissar_check_target_id)
             if checked is not None and checked.alive:
-                self.add_night_report_line(checked.user_id, "Ночью тебя проверял 🕵️ Комиссар Каттани.")
+                self.add_night_report_line(checked.user_id, "Кто-то сильно заинтересовался твоей ролью...")
                 mafia_checked = checked.role in MAFIA_ROLES
                 masked_by_advocate = mafia_checked and advocate_target_id == checked.user_id
                 if masked_by_advocate:
-                    self.add_night_report_line(
-                        checked.user_id,
-                        "Кто-то сильно заинтересовался твоей ролью...\n"
-                        "Но 👨🏼‍💼 Адвокат сказал, что ты 👨🏼 Мирный житель!",
-                    )
+                    self.add_night_report_line(checked.user_id, "Но 👨🏼‍💼 Адвокат сказал, что ты 👨🏼 Мирный житель!")
                     self.add_night_report_line(
                         commissar.user_id,
-                        f"🕵️ Результат проверки: {checked.full_name} - 👨🏼 <b>{ROLE_CITIZEN}</b>",
+                        f"<a href=\"tg://user?id={checked.user_id}\">{escape((checked.full_name or '').strip() or f'Игрок {checked.user_id}')}</a> - 👨🏼 <b>{ROLE_CITIZEN}</b>",
                     )
                 else:
-                    # Явный вывод роли для комиссара
                     self.add_night_report_line(
                         commissar.user_id,
                         self.commissar_check_result_text(checked),
@@ -1107,6 +1103,7 @@ class GameRoom:
         if bum is not None and self.bum_target_id is not None:
             observed = self.get_player(self.bum_target_id)
             if observed is not None:
+                observed_name = (observed.full_name or "").strip() or f"Игрок {observed.user_id}"
                 if observed.alive:
                     self.add_night_report_line(observed.user_id, "Ночью рядом с тобой крутился 🧥 Бомж.")
                 visitors: list[Player] = []
@@ -1143,15 +1140,18 @@ class GameRoom:
                         add_visitor(mafia_user_id)
 
                 if visitors:
-                    visitor_names = ", ".join(player.full_name for player in visitors)
+                    visitor_names = ", ".join(
+                        ((player.full_name or "").strip() or f"Игрок {player.user_id}")
+                        for player in visitors
+                    )
                     self.add_night_report_line(
                         bum.user_id,
-                        f"Ночью ты пришёл за бутылкой к {observed.full_name} и увидел там {visitor_names}",
+                        f"Ночью ты пришёл за бутылкой к {observed_name} и увидел там {visitor_names}",
                     )
                 else:
                     self.add_night_report_line(
                         bum.user_id,
-                        f"Ты выпросил у {observed.full_name} бутылку и ушёл обратно на улицу. Ничего подозрительного не произошло.",
+                        f"Ты выпросил у {observed_name} бутылку и ушёл обратно на улицу. Ничего подозрительного не произошло.",
                     )
 
         # Keep doctor's confirmation as the last line in personal report.
