@@ -2712,6 +2712,7 @@ async def on_action_callback(callback: CallbackQuery) -> None:
                 selected_user_id = None
             await callback.message.edit_text(
                 locked_choice_text(room, callback.from_user.id, selected_name, selected_user_id),
+                parse_mode="HTML",
             )
             await maybe_finish_phase_early(callback.bot, room)
             persist_room(room)
