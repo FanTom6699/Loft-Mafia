@@ -3259,6 +3259,10 @@ async def cmd_close(message: Message) -> None:
     else:
         closing_text = "Лобби закрыто."
 
+    if room.registration_open:
+        room.close_registration()
+        persist_room(room)
+
     await clear_registration_post(message.bot, room)
     cancel_phase_timer(message.chat.id)
     cancel_registration_timer(message.chat.id)
