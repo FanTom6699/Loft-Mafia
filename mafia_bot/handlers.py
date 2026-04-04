@@ -2103,10 +2103,53 @@ async def cmd_leave(message: Message) -> None:
         await message.answer("Лобби не найдено.")
         return
 
+    player = room.get_player(message.from_user.id)
+    if player is None:
+        await message.answer("Тебя нет в этой игре.")
+        return
+
+    if room.started and room.phase != PHASE_FINISHED:
+        if not player.alive:
+            await message.answer("Ты уже выбыл из игры.")
+            return
+
+        player.alive = False
+        room.check_winner()
+        persist_room(room)
+
+        leaver_mark = player_profile_link(player)
+        await message.answer(
+            f"{leaver_mark} не выдержал гнетущей атмосферы этого города и повесился.\n"
+            f"Он был {role_mark_text(player.role)}"
+        )
+
+        try:
+            await message.bot.send_message(player.user_id, "Ты вышел из игры")
+        except Exception:
+            pass
+
+        if room.phase == PHASE_FINISHED:
+            ensure_stats_recorded(room)
+            await message.answer(room.final_report_text())
+            cancel_phase_timer(message.chat.id)
+
+        persist_room(room)
+        return
+
     ok, info = room.remove_player(message.from_user.id)
     await message.answer(info)
     if ok:
         persist_room(room)
+
+    if ok:
+        try:
+            chat_name = room.chat_title or message.chat.title or str(message.chat.id)
+            await message.bot.send_message(
+                message.from_user.id,
+                f"Ты покинул регистрацию в чате <b>{escape(chat_name)}</b>",
+            )
+        except Exception:
+            pass
 
     if room.players:
         await message.answer(room.lobby_text())

@@ -112,6 +112,7 @@ class GameStateRepository:
             "mistress_target_id": room.mistress_target_id,
             "mistress_last_target_id": room.mistress_last_target_id,
             "bum_target_id": room.bum_target_id,
+            "bum_last_target_id": room.bum_last_target_id,
             "kamikaze_pending_user_id": room.kamikaze_pending_user_id,
             "kamikaze_target_id": room.kamikaze_target_id,
             "night_reports": room.night_reports,
@@ -180,6 +181,7 @@ class GameStateRepository:
         room.mistress_target_id = payload.get("mistress_target_id")
         room.mistress_last_target_id = payload.get("mistress_last_target_id")
         room.bum_target_id = payload.get("bum_target_id")
+        room.bum_last_target_id = payload.get("bum_last_target_id")
         room.kamikaze_pending_user_id = payload.get("kamikaze_pending_user_id")
         room.kamikaze_target_id = payload.get("kamikaze_target_id")
 

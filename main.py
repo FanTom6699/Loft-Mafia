@@ -13,6 +13,7 @@ from mafia_bot.handlers import restore_runtime_state, router
 async def setup_bot_commands(bot: Bot) -> None:
     group_commands = [
         BotCommand(command="game", description="Запустить новую игру (регистрация)"),
+        BotCommand(command="leave", description="Выйти из регистрации / игры"),
         BotCommand(command="extend", description="Продлить регистрацию"),
         BotCommand(command="start", description="Завершить регистрацию и начать игру"),
         BotCommand(command="stop", description="Отменить регистрацию / остановить игру"),

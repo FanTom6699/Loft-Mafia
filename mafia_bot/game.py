@@ -211,6 +211,7 @@ class GameRoom:
     mistress_target_id: int | None = None
     mistress_last_target_id: int | None = None
     bum_target_id: int | None = None
+    bum_last_target_id: int | None = None
     kamikaze_pending_user_id: int | None = None
     kamikaze_target_id: int | None = None
     night_reports: dict[int, list[str]] = field(default_factory=dict)
@@ -266,7 +267,9 @@ class GameRoom:
         self.advocate_target_id = None
         self.maniac_target_id = None
         self.mistress_target_id = None
+        self.mistress_last_target_id = None
         self.bum_target_id = None
+        self.bum_last_target_id = None
         self.kamikaze_pending_user_id = None
         self.kamikaze_target_id = None
         self.night_reports.clear()
@@ -322,6 +325,7 @@ class GameRoom:
         self.mistress_target_id = None
         self.mistress_last_target_id = None
         self.bum_target_id = None
+        self.bum_last_target_id = None
         self.kamikaze_pending_user_id = None
         self.kamikaze_target_id = None
         self.night_reports.clear()
@@ -859,6 +863,8 @@ class GameRoom:
             return False, "Цель уже выбыла."
         if target.user_id == bum.user_id:
             return False, "Нельзя наблюдать за собой."
+        if self.bum_last_target_id is not None and target.user_id == self.bum_last_target_id:
+            return False, "Нельзя ходить к одному и тому же игроку две ночи подряд."
 
         self.bum_target_id = target_user_id
         return True, "Бомж отправился наблюдать за целью."
@@ -1135,9 +1141,11 @@ class GameRoom:
                 if advocate_target_id == observed.user_id and advocate is not None:
                     add_visitor(advocate.user_id)
 
-                for mafia_user_id, voted_target_id in mafia_votes.items():
-                    if voted_target_id == observed.user_id:
-                        add_visitor(mafia_user_id)
+                don = next((p for p in self.alive_players() if p.role == ROLE_DON), None)
+                if don is not None:
+                    don_target_id = mafia_votes.get(don.user_id)
+                    if don_target_id == observed.user_id:
+                        add_visitor(don.user_id)
 
                 if visitors:
                     visitor_names = ", ".join(
@@ -1196,6 +1204,7 @@ class GameRoom:
         self.maniac_target_id = None
         self.mistress_last_target_id = mistress_target_id
         self.mistress_target_id = None
+        self.bum_last_target_id = self.bum_target_id
         self.bum_target_id = None
         self.kamikaze_pending_user_id = None
         self.kamikaze_target_id = None
