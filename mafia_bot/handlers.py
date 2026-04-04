@@ -315,6 +315,7 @@ async def start_registration_timer(room, bot: Bot, seconds: int) -> None:
     room.phase_started_at = datetime.now()
     room.phase_duration_seconds = seconds
     persist_room(room)
+    print(f"[DEBUG] registration_timer_started: chat_id={room.chat_id}, seconds={seconds}")
 
     async def worker() -> None:
         try:
@@ -333,8 +334,10 @@ async def start_registration_timer(room, bot: Bot, seconds: int) -> None:
                 await asyncio.sleep(warning_mark)
             else:
                 await asyncio.sleep(seconds)
+            print(f"[DEBUG] registration_timer_fired: chat_id={room.chat_id}")
             await process_registration_timeout(bot, room.chat_id)
         except asyncio.CancelledError:
+            print(f"[DEBUG] registration_timer_cancelled: chat_id={room.chat_id}")
             return
         except Exception as e:
             print(f"[ERROR] registration_timer_worker: chat_id={room.chat_id}, error={e!r}")
@@ -454,6 +457,7 @@ async def launch_game_from_registration(bot: Bot, room, chat_id: int, chat_title
 
 
 async def process_registration_timeout(bot: Bot, chat_id: int) -> None:
+    print(f"[DEBUG] process_registration_timeout_enter: chat_id={chat_id}")
     try:
         room = storage.get_room(chat_id)
     except Exception as e:
