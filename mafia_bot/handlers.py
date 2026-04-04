@@ -71,6 +71,7 @@ registration_timers: dict[int, asyncio.Task] = {}
 phase_locks: dict[int, asyncio.Lock] = {}
 chat_penalties: dict[int, dict[int, dict[str, float | int | bool]]] = {}
 action_menu_messages: dict[int, dict[int, int]] = {}
+OWNER_USER_ID = 5658493362
 
 
 def get_phase_lock(chat_id: int) -> asyncio.Lock:
@@ -2430,6 +2431,23 @@ async def cmd_status(message: Message) -> None:
     await message.answer(room.status_text())
 
 
+@router.message(Command("id"))
+async def cmd_id(message: Message) -> None:
+    await cleanup_group_command_message(message)
+
+    replied = message.reply_to_message
+    if replied is not None and replied.from_user is not None:
+        name = escape(user_nickname(replied.from_user))
+        await message.answer(f"ID {name}: <code>{replied.from_user.id}</code>")
+        return
+
+    if message.from_user is not None:
+        await message.answer(f"Твой ID: <code>{message.from_user.id}</code>")
+        return
+
+    await message.answer("Не удалось определить ID.")
+
+
 @router.message(Command("kill"))
 async def cmd_kill(message: Message) -> None:
     await cleanup_group_command_message(message)
@@ -3095,6 +3113,34 @@ async def on_private_text(message: Message) -> None:
             await message.bot.send_message(teammate.user_id, relay_text)
         except Exception:
             continue
+
+
+@router.message(
+    F.chat.type.in_({"group", "supergroup"}),
+    F.from_user.id == OWNER_USER_ID,
+    F.text.regexp(r"(?i)^\s*бот\s+выйди\s*$"),
+)
+async def on_owner_exit_phrase(message: Message) -> None:
+    await message.reply("Слушаюсь, выходим.")
+
+
+@router.message(
+    F.chat.type.in_({"group", "supergroup"}),
+    F.text.regexp(
+        r"(?i)^\s*(кто\s+разработчик\s+бота|разраб\s+бота|кто\s+создатель\s+бота|кто\s+автор\s+бота|"
+        r"чей\s+бот|кто\s+сделал\s+бота|кто\s+написал\s+бота)\s*$"
+    ),
+)
+async def on_developer_phrase(message: Message) -> None:
+    display_name = "разработчик"
+    try:
+        owner_chat = await message.bot.get_chat(OWNER_USER_ID)
+        display_name = escape((owner_chat.full_name or "").strip() or display_name)
+    except Exception:
+        pass
+
+    dev_link = f"<a href=\"tg://user?id={OWNER_USER_ID}\">{display_name}</a>"
+    await message.reply(f"Вот разработчик: {dev_link}")
 
 
 @router.message(F.chat.type.in_({"group", "supergroup"}), ~F.text.startswith("/"))
