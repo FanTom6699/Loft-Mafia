@@ -1621,7 +1621,7 @@ class GameRoom:
 
     def day_media_caption(self) -> str:
         return (
-            f"☀️ Наступает день {self.round_no}\n"
+            f"<b>🏙 День {self.round_no}</b>\n"
             "Город просыпается и обсуждает события ночи."
         )
 

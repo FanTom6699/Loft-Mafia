@@ -60,7 +60,7 @@ NIGHT_PHASE_SECONDS = read_phase_seconds("NIGHT_PHASE_SECONDS", 60)
 DAY_DISCUSSION_SECONDS = read_phase_seconds("DAY_DISCUSSION_SECONDS", 60)
 DAY_NOMINATION_SECONDS = read_phase_seconds("DAY_NOMINATION_SECONDS", 45)
 DAY_TRIAL_SECONDS = read_phase_seconds("DAY_TRIAL_SECONDS", 60)
-REGISTRATION_SECONDS = read_phase_seconds("REGISTRATION_SECONDS", 60)
+REGISTRATION_SECONDS = read_phase_seconds("REGISTRATION_SECONDS", 120)
 REGISTRATION_EXTENSION_SECONDS = read_phase_seconds("REGISTRATION_EXTENSION_SECONDS", 30)
 RESTART_EXPIRED_PHASE_POLICY = os.getenv("RESTART_EXPIRED_PHASE_POLICY", "catch_up").strip().lower()
 DAY_IMAGE_PATH = os.getenv("DAY_IMAGE_PATH", os.path.join("assets", "day.jpg"))
@@ -1447,14 +1447,15 @@ async def process_night_end(bot: Bot, chat_id: int, timer_reason: str | None = N
         if lucky_triggered:
             await bot.send_message(chat_id, "☝️ Кому-то из игроков повезло")
 
+        if mafia_alive_tonight and mafia_target_tonight is None:
+            await bot.send_message(chat_id, "🚷 🤵🏻 <b>Дон</b> сегодня не в настроении")
+
         await send_phase_media(bot, chat_id, room.day_media_caption(), DAY_IMAGE_PATH)
 
         if don_transfer_note:
             await announce_don_transfer(room, bot, don_successor_id)
         if commissar_transfer_note:
             await announce_commissar_transfer(room, bot, commissar_successor_id)
-        if mafia_alive_tonight and mafia_target_tonight is None:
-            await bot.send_message(chat_id, "🚷 🤵🏻 Дон сегодня не в настроении")
 
         if eliminated:
             for dead in eliminated:
@@ -1482,7 +1483,7 @@ async def process_night_end(bot: Bot, chat_id: int, timer_reason: str | None = N
                     chat_id,
                     "Кто-то из жителей слышал, как "
                     f"{dead_mark} кричал перед смертью:\n"
-                    "Я больше не бу-у-у-у-ду спать во время игры-ы-ы-ы-ы-ы-!",
+                    "<b>Я больше не бу-у-у-у-ду спать во время игры-ы-ы-ы-ы-ы-!</b>",
                 )
         else:
             await bot.send_message(chat_id, "🤷 Удивительно, но этой ночью все выжили")
@@ -1593,7 +1594,6 @@ async def process_day_end(bot: Bot, chat_id: int, timer_reason: str | None = Non
                 ok_end, info_end = room.end_day_no_lynch()
                 print(f"[PHASE] process_day_end: end_day_no_lynch result for chat_id={chat_id}, ok_end={ok_end}, info={info_end}")
                 if ok_end:
-                    await bot.send_message(chat_id, "Сегодня решили никого не вешать.")
                     keyboard = await night_action_keyboard(bot)
                     await send_phase_media(
                         bot,
