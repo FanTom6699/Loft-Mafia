@@ -1449,7 +1449,8 @@ async def process_night_end(bot: Bot, chat_id: int, timer_reason: str | None = N
                 print(f"[ERROR] process_night_end: failed to send timer_reason for chat_id={chat_id}, error={e!r}")
 
         if mafia_alive_tonight and mafia_target_tonight is not None and not room.mafia_target_announced:
-            await safe_send_message(bot, chat_id, "🤵🏻 Мафия выбрала жертву...")
+            await safe_send_message(bot, chat_id, "🤵🏻 Мафия определилась с общей целью.")
+            room.mafia_target_announced = True
 
         reports = room.pop_night_reports()
         kill_sources = room.pop_night_kill_sources()
@@ -2678,12 +2679,6 @@ async def on_action_callback(callback: CallbackQuery) -> None:
                     "Голосование мафии завершено\n"
                     f"Мафия принесла в жертву {final_name}.",
                 )
-                if not room.mafia_target_announced:
-                    room.mafia_target_announced = True
-                    await callback.bot.send_message(
-                        room.chat_id,
-                        "🤵🏻 Мафия определилась с общей целью.",
-                    )
             if target is not None:
                 selected_name = player_display_name(target)
                 selected_user_id = target.user_id
@@ -3118,10 +3113,24 @@ async def on_private_text(message: Message) -> None:
 @router.message(
     F.chat.type.in_({"group", "supergroup"}),
     F.from_user.id == OWNER_USER_ID,
-    F.text.regexp(r"(?i)^\s*бот\s+выйди\s*$"),
+    F.text.regexp(r"(?i)^\s*бот\s+выйд[иmм]\s*$"),
 )
 async def on_owner_exit_phrase(message: Message) -> None:
+    room = storage.get_room(message.chat.id)
+    if room is not None:
+        await clear_registration_post(message.bot, room)
+        cancel_phase_timer(message.chat.id)
+        cancel_registration_timer(message.chat.id)
+        clear_chat_penalties(message.chat.id)
+        clear_action_menu_messages(message.chat.id)
+        remove_room_state(message.chat.id)
+        storage.close_room(message.chat.id)
+
     await message.reply("Слушаюсь, выходим.")
+    try:
+        await message.bot.leave_chat(message.chat.id)
+    except Exception:
+        pass
 
 
 @router.message(

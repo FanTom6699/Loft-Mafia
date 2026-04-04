@@ -1031,6 +1031,8 @@ class GameRoom:
             if target is not None and target.alive and target.user_id != maniac.user_id:
                 maniac_target_id = target.user_id
 
+        don = next((p for p in self.alive_players() if p.role == ROLE_DON), None)
+
         commissar = next((p for p in self.alive_players() if p.role == ROLE_COMMISSAR), None)
         advocate = next((p for p in self.alive_players() if p.role == ROLE_ADVOCATE), None)
         advocate_target_id: int | None = None
@@ -1203,7 +1205,6 @@ class GameRoom:
                 if advocate_target_id == observed.user_id and advocate is not None:
                     add_visitor(advocate.user_id)
 
-                don = next((p for p in self.alive_players() if p.role == ROLE_DON), None)
                 if don is not None:
                     don_target_id = mafia_votes.get(don.user_id)
                     if don_target_id == observed.user_id:
