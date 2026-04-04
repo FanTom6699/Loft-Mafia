@@ -1422,6 +1422,8 @@ async def announce_commissar_transfer(room, bot: Bot, commissar_successor_id: in
 
 
 async def prompt_last_words(bot: Bot, room, eliminated) -> None:
+    if room.phase == PHASE_FINISHED:
+        return
     queued_user_ids = room.queue_last_words(eliminated)
     if queued_user_ids:
         persist_room(room)
@@ -1525,8 +1527,9 @@ async def process_night_end(bot: Bot, chat_id: int, timer_reason: str | None = N
                 if killer_text:
                     text += f"\n{killer_text}"
                 await bot.send_message(chat_id, text)
-            non_afk_eliminated = [player for player in eliminated if player.user_id not in afk_killed_ids]
-            await prompt_last_words(bot, room, non_afk_eliminated)
+            if room.phase != PHASE_FINISHED:
+                non_afk_eliminated = [player for player in eliminated if player.user_id not in afk_killed_ids]
+                await prompt_last_words(bot, room, non_afk_eliminated)
 
             for dead in eliminated:
                 if dead.user_id not in afk_killed_ids:
@@ -1563,6 +1566,7 @@ async def process_night_end(bot: Bot, chat_id: int, timer_reason: str | None = N
         await bot.send_message(chat_id, day_summary)
 
         if room.phase == PHASE_FINISHED:
+            room.pending_last_words.clear()
             ensure_stats_recorded(room)
             await bot.send_message(chat_id, room.final_report_text())
             cancel_phase_timer(chat_id)
@@ -1625,11 +1629,22 @@ async def process_day_end(bot: Bot, chat_id: int, timer_reason: str | None = Non
 
             if candidate_id is None:
                 print(f"[PHASE] process_day_end: no single candidate selected, ending day without lynch for chat_id={chat_id}")
-                await bot.send_message(
-                    chat_id,
-                    "Голоса на этапе выбора кандидата разделились поровну.\n"
-                    "🗿 Жители решили никого не вешать...",
-                )
+                actual_votes = [
+                    target_id
+                    for target_id in room.day_votes.values()
+                    if target_id and (room.get_player(target_id) is not None)
+                ]
+                if actual_votes:
+                    await bot.send_message(
+                        chat_id,
+                        "Голоса на этапе выбора кандидата разделились поровну.\n"
+                        "🗿 Жители решили никого не вешать...",
+                    )
+                else:
+                    await bot.send_message(
+                        chat_id,
+                        "Голосование окончено\n🗿 Жители решили никого не вешать...",
+                    )
 
                 ok_end, info_end = room.end_day_no_lynch()
                 print(f"[PHASE] process_day_end: end_day_no_lynch result for chat_id={chat_id}, ok_end={ok_end}, info={info_end}")
@@ -1730,7 +1745,7 @@ async def process_day_end(bot: Bot, chat_id: int, timer_reason: str | None = Non
                         await safe_send_message(
                             bot,
                             first.user_id,
-                            "Тебя линчевали на дневном голосовании.",
+                            "тебя линчевали на дневном голосовании",
                         )
                 except Exception:
                     pass
@@ -1755,6 +1770,7 @@ async def process_day_end(bot: Bot, chat_id: int, timer_reason: str | None = Non
                 await announce_commissar_transfer(room, bot, commissar_successor_id)
 
             if room.phase == PHASE_FINISHED:
+                room.pending_last_words.clear()
                 ensure_stats_recorded(room)
                 await safe_send_message(bot, chat_id, room.final_report_text())
                 cancel_phase_timer(chat_id)
@@ -2321,6 +2337,13 @@ async def on_registration_action(callback: CallbackQuery) -> None:
             await callback.answer("Пока действует мут, создание лобби недоступно.", show_alert=True)
             return
 
+        if not await bot_has_delete_permission(callback.bot, chat_id):
+            await callback.answer(
+                "Не могу открыть регистрацию: дайте боту право администратора «Удалять сообщения».",
+                show_alert=True,
+            )
+            return
+
         if room is None:
             ok, info = storage.create_room(chat_id=chat_id, host_id=callback.from_user.id)
             if not ok:
@@ -2420,6 +2443,9 @@ async def on_registration_action(callback: CallbackQuery) -> None:
         if room.started:
             await callback.answer("Игра уже началась.", show_alert=True)
             return
+        if room.registration_open:
+            room.close_registration()
+            persist_room(room)
         await clear_registration_post(callback.bot, room)
         cancel_phase_timer(chat_id)
         cancel_registration_timer(chat_id)
@@ -2432,6 +2458,9 @@ async def on_registration_action(callback: CallbackQuery) -> None:
         return
 
     if action == "cancel":
+        if room.registration_open:
+            room.close_registration()
+            persist_room(room)
         await clear_registration_post(callback.bot, room)
         cancel_phase_timer(chat_id)
         cancel_registration_timer(chat_id)
