@@ -927,19 +927,6 @@ async def is_group_admin(bot: Bot, chat_id: int, user_id: int) -> bool:
     return member.status in {"administrator", "creator"}
 
 
-async def can_manage_group_settings(bot: Bot, chat_id: int, user_id: int) -> bool:
-    try:
-        member = await bot.get_chat_member(chat_id, user_id)
-    except Exception:
-        return False
-
-    if member.status == "creator":
-        return True
-    if member.status != "administrator":
-        return False
-    return bool(getattr(member, "can_change_info", False))
-
-
 async def bot_has_delete_permission(bot: Bot, chat_id: int) -> bool:
     try:
         me = await bot.get_me()
@@ -2511,10 +2498,6 @@ async def cmd_settings(message: Message) -> None:
         return
     if message.chat.type == "private":
         await message.answer("Настройки вызываются из игрового чата.")
-        return
-
-    if not await can_manage_group_settings(message.bot, message.chat.id, message.from_user.id):
-        await message.answer("Для вызова /settings нужны права на изменение данных группы.")
         return
 
     if not repo.has_private_user(message.from_user.id):
