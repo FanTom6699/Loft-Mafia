@@ -645,8 +645,7 @@ def format_private_profile_text(display_name: str, stats: dict | None) -> str:
         f"👤 <b>{safe_name}</b>\n\n"
         f"💵 Деньги: <b>{money}</b>\n"
         f"🎟 Билетики: <b>{tickets}</b>\n\n"
-        f"🎭 Последняя роль: {last_role_mark}\n"
-        "📩 Роль и ходы во время игры приходят сюда."
+        f"🎭 Последняя роль: {last_role_mark}"
     )
 
 
