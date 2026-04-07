@@ -2637,7 +2637,9 @@ async def cmd_leave(message: Message) -> None:
     await cleanup_group_command_message(message)
     room = storage.get_room(message.chat.id)
     if room is None:
-        await message.answer("Лобби не найдено.")
+        return
+
+    if not room.started or room.phase == PHASE_FINISHED:
         return
 
     player = room.get_player(message.from_user.id)
@@ -2675,39 +2677,6 @@ async def cmd_leave(message: Message) -> None:
 
         persist_room(room)
         return
-
-    ok, _ = room.remove_player(message.from_user.id)
-    if not ok:
-        await message.answer("Тебя нет в этой игре.")
-        return
-
-    if ok:
-        persist_room(room)
-
-    if ok:
-        try:
-            chat_name = room.chat_title or message.chat.title or str(message.chat.id)
-            await message.bot.send_message(
-                message.from_user.id,
-                f"Ты покинул регистрацию в чате <b>{escape(chat_name)}</b>",
-            )
-        except Exception:
-            pass
-
-    if room.players:
-        await refresh_registration_post(message, room)
-    else:
-        await clear_registration_post(message.bot, room)
-        await clear_registration_panel_message(message.bot, message.chat.id)
-        await clear_registration_notice_message(message.bot, message.chat.id)
-        await clear_registration_warning_message(message.bot, message.chat.id)
-        cancel_phase_timer(message.chat.id)
-        cancel_registration_timer(message.chat.id)
-        clear_chat_penalties(message.chat.id)
-        clear_action_menu_messages(message.chat.id)
-        remove_room_state(message.chat.id)
-        storage.close_room(message.chat.id)
-
 
 @router.message(Command("lobby"))
 async def cmd_lobby(message: Message) -> None:
