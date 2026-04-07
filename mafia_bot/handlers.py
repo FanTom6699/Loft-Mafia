@@ -1532,7 +1532,12 @@ def build_action_keyboard(room, actor_user_id: int) -> InlineKeyboardMarkup | No
 
     def target_label(target, teammate_mark: str = "") -> str:
         base_name = player_display_name(target)
-        return f"{teammate_mark} {base_name}".strip()
+        extra_mark = ""
+        if actor.role == ROLE_COMMISSAR:
+            known_role = room.commissar_known_roles.get(target.user_id)
+            if known_role:
+                extra_mark = ROLE_EMOJI.get(known_role, "")
+        return f"{teammate_mark} {extra_mark} {base_name}".strip()
 
     if room.phase == "night":
         if actor.role in {"Дон", "Мафия"}:

@@ -130,6 +130,7 @@ class GameStateRepository:
             "commissar_action_mode": room.commissar_action_mode,
             "commissar_target_id": room.commissar_target_id,
             "commissar_shot_target_id": room.commissar_shot_target_id,
+            "commissar_known_roles": room.commissar_known_roles,
             "advocate_target_id": room.advocate_target_id,
             "maniac_target_id": room.maniac_target_id,
             "mistress_target_id": room.mistress_target_id,
@@ -203,6 +204,10 @@ class GameStateRepository:
         room.commissar_action_mode = payload.get("commissar_action_mode")
         room.commissar_target_id = payload.get("commissar_target_id")
         room.commissar_shot_target_id = payload.get("commissar_shot_target_id")
+        room.commissar_known_roles = {
+            int(k): str(v)
+            for k, v in payload.get("commissar_known_roles", {}).items()
+        }
         room.advocate_target_id = payload.get("advocate_target_id")
         room.maniac_target_id = payload.get("maniac_target_id")
         room.mistress_target_id = payload.get("mistress_target_id")

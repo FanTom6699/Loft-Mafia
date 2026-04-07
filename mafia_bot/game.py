@@ -217,6 +217,7 @@ class GameRoom:
     commissar_action_mode: str | None = None
     commissar_target_id: int | None = None
     commissar_shot_target_id: int | None = None
+    commissar_known_roles: dict[int, str] = field(default_factory=dict)
     advocate_target_id: int | None = None
     maniac_target_id: int | None = None
     mistress_target_id: int | None = None
@@ -278,6 +279,7 @@ class GameRoom:
         self.commissar_action_mode = None
         self.commissar_target_id = None
         self.commissar_shot_target_id = None
+        self.commissar_known_roles.clear()
         self.advocate_target_id = None
         self.maniac_target_id = None
         self.mistress_target_id = None
@@ -337,6 +339,7 @@ class GameRoom:
         self.commissar_action_mode = None
         self.commissar_target_id = None
         self.commissar_shot_target_id = None
+        self.commissar_known_roles.clear()
         self.advocate_target_id = None
         self.maniac_target_id = None
         self.mistress_target_id = None
@@ -467,6 +470,17 @@ class GameRoom:
         new_commissar = min(candidates, key=lambda p: p.user_id)
         new_commissar.role = ROLE_COMMISSAR
         return "👮🏼‍♂️ Сержант унаследовал роль 🕵️‍ Комиссар Каттани", new_commissar.user_id
+
+    def remember_commissar_check(self, target_user_id: int, result_role: str) -> None:
+        self.commissar_known_roles[target_user_id] = result_role
+
+    def forget_dead_commissar_checks(self) -> None:
+        alive_ids = {player.user_id for player in self.alive_players()}
+        self.commissar_known_roles = {
+            user_id: role
+            for user_id, role in self.commissar_known_roles.items()
+            if user_id in alive_ids
+        }
 
     def alive_civilians(self) -> list[Player]:
         return [
@@ -1113,11 +1127,13 @@ class GameRoom:
                 masked_by_advocate = mafia_checked and advocate_target_id == checked.user_id
                 if masked_by_advocate:
                     self.add_night_report_line(checked.user_id, "Но 👨🏼‍💼 Адвокат сказал, что ты 👨🏼 Мирный житель!")
+                    self.remember_commissar_check(checked.user_id, ROLE_CITIZEN)
                     self.add_night_report_line(
                         commissar.user_id,
                         f"<a href=\"tg://user?id={checked.user_id}\">{escape((checked.full_name or '').strip() or f'Игрок {checked.user_id}')}</a> - 👨🏼 <b>{ROLE_CITIZEN}</b>",
                     )
                 else:
+                    self.remember_commissar_check(checked.user_id, checked.role)
                     self.add_night_report_line(
                         commissar.user_id,
                         self.commissar_check_result_text(checked),
@@ -1381,6 +1397,8 @@ class GameRoom:
             if commissar_transfer_result is not None:
                 commissar_transfer_note, commissar_successor_id = commissar_transfer_result
 
+        self.forget_dead_commissar_checks()
+
         self.night_votes.clear()
         self.mafia_vote_locked = False
         self.mafia_target_announced = False
@@ -1512,7 +1530,6 @@ class GameRoom:
             if first and first.alive:
                 first.alive = False
                 eliminated.append(first)
-
                 if first.role == ROLE_SUICIDE:
                     self.suicide_winners.add(first.user_id)
 
@@ -1522,6 +1539,8 @@ class GameRoom:
                         extra = random.choice(candidates)
                         extra.alive = False
                         eliminated.append(extra)
+
+        self.forget_dead_commissar_checks()
 
         don_transfer_note: str | None = None
         don_successor_id: int | None = None
