@@ -73,6 +73,7 @@ phase_locks: dict[int, asyncio.Lock] = {}
 chat_penalties: dict[int, dict[int, dict[str, float | int | bool]]] = {}
 action_menu_messages: dict[int, dict[int, int]] = {}
 delete_permission_alerted_chats: set[int] = set()
+registration_panel_message_ids: dict[int, int] = {}
 OWNER_USER_ID = 5658493362
 MISTRESS_DAY_BLOCK_TOAST = "Ты под действием Любовницы."
 
@@ -597,20 +598,18 @@ def format_player_stats_text(stats: dict) -> str:
     tickets = int(stats.get("tickets", 0))
     last_role = str(stats.get("last_role", "") or "-")
     name = str(stats.get("display_name", "Игрок"))
-    last_role_mark = role_mark_text(last_role) if last_role != "-" else "-"
+    total_special_games = mafia_games + maniac_games + civilian_games
 
     return (
-        "<b>Твоя статистика</b>\n"
-        f"Игрок: {name}\n"
-        f"Игр сыграно: {games}\n"
-        f"Побед: {wins}\n"
-        f"Поражений: {losses}\n"
-        f"Партий за мафию: {mafia_games}\n"
-        f"Партий за маньяка: {maniac_games}\n"
-        f"Партий за мирных: {civilian_games}\n"
-        f"💵 Деньги: {money}\n"
-        f"🎟 Билетики: {tickets}\n"
-        f"Последняя роль: {last_role_mark}"
+        "<b>Твоя статистика</b>\n\n"
+        f"👤 Игрок: <b>{escape(name)}</b>\n\n"
+        f"🎮 Всего партий: <b>{games}</b>\n"
+        f"🏆 Побед: <b>{wins}</b>\n"
+        f"💀 Поражений: <b>{losses}</b>\n\n"
+        f"🕴 За мафию: <b>{mafia_games}</b>\n"
+        f"🔪 За маньяка: <b>{maniac_games}</b>\n"
+        f"🙂 За мирных: <b>{civilian_games}</b>\n\n"
+        f"📚 Учтено партий по ролям: <b>{total_special_games}</b>"
     )
 
 
@@ -636,9 +635,6 @@ def format_endgame_currency_text(player, stats: dict, won: bool) -> str:
 
 def format_private_profile_text(display_name: str, stats: dict | None) -> str:
     safe_name = escape((display_name or "").strip() or "Игрок")
-    games = int((stats or {}).get("games_played", 0))
-    wins = int((stats or {}).get("wins", 0))
-    losses = int((stats or {}).get("losses", 0))
     money = int((stats or {}).get("money", 0))
     tickets = int((stats or {}).get("tickets", 0))
     last_role = str((stats or {}).get("last_role", "") or "-")
@@ -646,13 +642,11 @@ def format_private_profile_text(display_name: str, stats: dict | None) -> str:
 
     return (
         "<b>Игровой профиль</b>\n\n"
-        f"👤 {safe_name}\n\n"
-        f"💵 Деньги: {money}\n"
-        f"🎟 Билетики: {tickets}\n"
+        f"👤 <b>{safe_name}</b>\n\n"
+        f"💵 Деньги: <b>{money}</b>\n"
+        f"🎟 Билетики: <b>{tickets}</b>\n\n"
         f"🎭 Последняя роль: {last_role_mark}\n"
-        f"🎮 Игр сыграно: {games}\n"
-        f"🏆 Побед: {wins}\n"
-        f"💀 Поражений: {losses}"
+        "📩 Роль и ходы во время игры приходят сюда."
     )
 
 
@@ -876,11 +870,6 @@ async def bot_start_link(bot: Bot) -> str:
     return f"https://t.me/{me.username}?start=welcome"
 
 
-async def bot_add_to_chat_link(bot: Bot) -> str:
-    me = await bot.get_me()
-    return f"https://t.me/{me.username}?startgroup=true"
-
-
 def registration_text(room) -> str:
     lines = ["<b>Ведётся набор в игру</b>", ""]
     if not room.players:
@@ -987,20 +976,19 @@ def registration_lobby_keyboard(join_link: str) -> InlineKeyboardMarkup:
     )
 
 
-def registration_panel() -> InlineKeyboardMarkup:
+def registration_panel(panel_message_id: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [
-                InlineKeyboardButton(text="Создать лобби", callback_data="reg:start"),
+                InlineKeyboardButton(text="Создать лобби", callback_data=f"reg:start:{panel_message_id}"),
             ],
         ]
     )
 
 
-def private_main_menu_keyboard(add_to_chat_link: str) -> InlineKeyboardMarkup:
+def private_main_menu_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
-            [InlineKeyboardButton(text="➕ Добавить бота в чат", url=add_to_chat_link)],
             [
                 InlineKeyboardButton(text="👤 Игровой профиль", callback_data="pmenu:profile"),
                 InlineKeyboardButton(text="🎭 Роли", callback_data="pmenu:roles"),
@@ -2091,6 +2079,7 @@ def role_card_for_player(room, player, chat_title: str) -> str:
 async def cmd_start(message: Message, command: CommandObject) -> None:
     is_private_first_visit = False
     nickname = ""
+    keyboard = private_main_menu_keyboard()
     if message.chat.type == "private":
         nickname = user_nickname(message.from_user)
         is_private_first_visit = repo.touch_private_user(message.from_user.id, nickname)
@@ -2099,12 +2088,11 @@ async def cmd_start(message: Message, command: CommandObject) -> None:
         if is_private_first_visit:
             await message.answer(
                 (
-                    "<b>Добро пожаловать в Мафию</b>\n\n"
-                    f"👋 Привет, {nickname}!\n"
-                    "Сейчас зарегистрирую тебя в лобби.\n\n"
-                    "<b>Дальше:</b>\n"
-                    "• Роль и меню ходов будут приходить автоматически в этот чат."
-                )
+                    f"<b>Привет, {nickname}! 👋</b>\n\n"
+                    "Добро пожаловать в <b>Loft Mafia Bot</b> 🎭\n\n"
+                    "Здесь ты будешь получать роль, делать ходы и смотреть свой игровой профиль."
+                ),
+                reply_markup=keyboard,
             )
         try:
             chat_id = int(command.args.split("_", maxsplit=1)[1])
@@ -2143,14 +2131,12 @@ async def cmd_start(message: Message, command: CommandObject) -> None:
         return
 
     if message.chat.type == "private":
-        add_to_chat_link = await bot_add_to_chat_link(message.bot)
-        keyboard = private_main_menu_keyboard(add_to_chat_link)
         if is_private_first_visit:
             text = (
                 f"<b>Привет, {nickname}! 👋</b>\n\n"
                 "Добро пожаловать в <b>Loft Mafia Bot</b> 🎭\n\n"
                 "Здесь ты будешь получать роль, делать ходы и смотреть свой игровой профиль.\n\n"
-                "Чтобы начать игру, сначала добавь бота в чат кнопкой ниже."
+                "Чтобы начать игру, зайди в игровой чат и зарегистрируйся в лобби."
             )
         else:
             text = (
@@ -2239,7 +2225,13 @@ async def cmd_panel(message: Message) -> None:
         await message.answer("Панель доступна в групповом чате.")
         return
 
-    await message.answer("Панель регистрации:", reply_markup=registration_panel())
+    sent = await message.answer("Панель регистрации:")
+    registration_panel_message_ids[message.chat.id] = sent.message_id
+    await message.bot.edit_message_reply_markup(
+        chat_id=message.chat.id,
+        message_id=sent.message_id,
+        reply_markup=registration_panel(sent.message_id),
+    )
 
 
 @router.message(Command("game"))
@@ -2467,11 +2459,24 @@ async def on_registration_action(callback: CallbackQuery) -> None:
         return
 
     chat_id = callback.message.chat.id
-    action = callback.data.split(":", maxsplit=1)[1]
+    parts = callback.data.split(":")
+    action = parts[1] if len(parts) > 1 else ""
 
     room = storage.get_room(chat_id)
 
     if action == "start":
+        if len(parts) != 3:
+            await callback.answer()
+            return
+        try:
+            panel_message_id = int(parts[2])
+        except ValueError:
+            await callback.answer()
+            return
+        if registration_panel_message_ids.get(chat_id) != panel_message_id:
+            await callback.answer()
+            return
+
         if is_user_blocked(chat_id, callback.from_user.id):
             await notify_registration_blocked(callback.bot, chat_id, callback.from_user.id)
             await callback.answer("Пока действует мут, создание лобби недоступно.", show_alert=True)
@@ -3163,13 +3168,12 @@ async def on_private_menu_callback(callback: CallbackQuery) -> None:
 
     if action == "main":
         nickname = user_nickname(callback.from_user)
-        add_to_chat_link = await bot_add_to_chat_link(callback.bot)
         await show_menu_screen(
             (
                 f"<b>С возвращением, {nickname}!</b>\n\n"
                 "Выбери нужный раздел кнопками ниже."
             ),
-            private_main_menu_keyboard(add_to_chat_link),
+            private_main_menu_keyboard(),
         )
         await safe_answer()
         return
