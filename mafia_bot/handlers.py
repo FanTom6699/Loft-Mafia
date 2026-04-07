@@ -97,7 +97,6 @@ SETTINGS_ROLE_OPTIONS = [
 ]
 SETTINGS_TIMING_OPTIONS = [30, 45, 60, 75, 90, 120, 180, 240, 300, 360]
 SETTINGS_LEAVE_OPTIONS = [0, 1800, 3600, 7200, 10800, 21600, 43200, 86400]
-SETTINGS_ROLE_TOGGLES: dict[str, bool] = {role: True for role in SETTINGS_ROLE_OPTIONS}
 SETTINGS_TIMING_LABELS = {
     "registration": "Регистрация",
     "night": "Ночь",
@@ -163,13 +162,14 @@ def cancel_registration_timer(chat_id: int) -> None:
 
 
 def current_day_stage_seconds(room) -> int:
+    settings = room_chat_settings(room)
     if room.day_stage == DAY_STAGE_DISCUSSION:
-        return DAY_DISCUSSION_SECONDS
+        return int(settings["timings"]["day"])
     if room.day_stage == DAY_STAGE_NOMINATION:
-        return DAY_NOMINATION_SECONDS
+        return int(settings["timings"]["vote"])
     if room.day_stage == DAY_STAGE_TRIAL:
-        return DAY_TRIAL_SECONDS
-    return DAY_NOMINATION_SECONDS
+        return int(settings["timings"]["trial"])
+    return int(settings["timings"]["vote"])
 
 
 def clear_chat_penalties(chat_id: int) -> None:
@@ -189,6 +189,84 @@ def role_mark_text(role: str) -> str:
     return f"{emoji} <b>{role}</b>".strip()
 
 
+def default_chat_settings() -> dict:
+    return {
+        "roles": {role: True for role in SETTINGS_ROLE_OPTIONS},
+        "timings": {
+            "registration": REGISTRATION_SECONDS,
+            "night": NIGHT_PHASE_SECONDS,
+            "day": DAY_DISCUSSION_SECONDS,
+            "vote": DAY_NOMINATION_SECONDS,
+            "trial": DAY_TRIAL_SECONDS,
+        },
+        "mute": {
+            "dead": MUTE_DEAD_PLAYERS,
+            "sleeping": MUTE_SLEEPING_PLAYERS,
+            "outsiders": MUTE_NON_PLAYERS,
+        },
+        "leave_restriction_seconds": LEAVE_RESTRICTION_SECONDS,
+    }
+
+
+def merge_chat_settings(raw_settings: dict | None) -> dict:
+    settings = default_chat_settings()
+    if not isinstance(raw_settings, dict):
+        return settings
+
+    raw_roles = raw_settings.get("roles", {})
+    if isinstance(raw_roles, dict):
+        for role in SETTINGS_ROLE_OPTIONS:
+            if role in raw_roles:
+                settings["roles"][role] = bool(raw_roles[role])
+
+    raw_timings = raw_settings.get("timings", {})
+    if isinstance(raw_timings, dict):
+        for key in settings["timings"]:
+            raw_value = raw_timings.get(key)
+            if isinstance(raw_value, int) and raw_value > 0:
+                settings["timings"][key] = raw_value
+
+    raw_mute = raw_settings.get("mute", {})
+    if isinstance(raw_mute, dict):
+        for key in settings["mute"]:
+            if key in raw_mute:
+                settings["mute"][key] = bool(raw_mute[key])
+
+    raw_leave_restriction = raw_settings.get("leave_restriction_seconds")
+    if isinstance(raw_leave_restriction, int) and raw_leave_restriction >= 0:
+        settings["leave_restriction_seconds"] = raw_leave_restriction
+
+    return settings
+
+
+def load_chat_settings(chat_id: int) -> dict:
+    return merge_chat_settings(repo.get_chat_settings(chat_id))
+
+
+def room_chat_settings(room) -> dict:
+    return merge_chat_settings(getattr(room, "settings", None))
+
+
+def apply_room_settings(room, settings: dict) -> dict:
+    normalized = merge_chat_settings(settings)
+    room.settings = normalized
+    return normalized
+
+
+def save_chat_settings(chat_id: int, settings: dict) -> dict:
+    normalized = merge_chat_settings(settings)
+    repo.save_chat_settings(chat_id, normalized)
+    room = storage.get_room(chat_id)
+    if room is not None:
+        apply_room_settings(room, normalized)
+        persist_room(room)
+    return normalized
+
+
+def settings_callback_data(chat_id: int, *parts: object) -> str:
+    return ":".join(["psettings", str(chat_id), *(str(part) for part in parts)])
+
+
 def selected_square(active: bool) -> str:
     return "⬛" if active else "⬜"
 
@@ -201,27 +279,29 @@ def format_leave_duration(seconds: int) -> str:
     return f"{seconds // 60} мин."
 
 
-def current_settings_timing_value(key: str) -> int:
+def current_settings_timing_value(settings: dict, key: str) -> int:
+    timings = settings.get("timings", {})
     if key == "registration":
-        return REGISTRATION_SECONDS
+        return int(timings.get("registration", REGISTRATION_SECONDS))
     if key == "night":
-        return NIGHT_PHASE_SECONDS
+        return int(timings.get("night", NIGHT_PHASE_SECONDS))
     if key == "day":
-        return DAY_DISCUSSION_SECONDS
+        return int(timings.get("day", DAY_DISCUSSION_SECONDS))
     if key == "vote":
-        return DAY_NOMINATION_SECONDS
+        return int(timings.get("vote", DAY_NOMINATION_SECONDS))
     if key == "trial":
-        return DAY_TRIAL_SECONDS
+        return int(timings.get("trial", DAY_TRIAL_SECONDS))
     return 0
 
 
-def current_settings_mute_value(key: str) -> bool:
+def current_settings_mute_value(settings: dict, key: str) -> bool:
+    mute_settings = settings.get("mute", {})
     if key == "dead":
-        return MUTE_DEAD_PLAYERS
+        return bool(mute_settings.get("dead", MUTE_DEAD_PLAYERS))
     if key == "sleeping":
-        return MUTE_SLEEPING_PLAYERS
+        return bool(mute_settings.get("sleeping", MUTE_SLEEPING_PLAYERS))
     if key == "outsiders":
-        return MUTE_NON_PLAYERS
+        return bool(mute_settings.get("outsiders", MUTE_NON_PLAYERS))
     return False
 
 
@@ -488,7 +568,7 @@ def format_killer_sources_text(sources: list[str]) -> str:
 
 def registration_remaining_seconds(room) -> int:
     if room.phase_started_at is None or room.phase_duration_seconds is None:
-        return REGISTRATION_SECONDS
+        return int(room_chat_settings(room)["timings"]["registration"])
     elapsed = int((datetime.now() - room.phase_started_at).total_seconds())
     remaining = int(room.phase_duration_seconds) - elapsed
     return remaining if remaining > 0 else 0
@@ -1052,7 +1132,7 @@ def registration_text(room) -> str:
 def registration_post_text(room) -> str:
     remaining = registration_remaining_seconds(room)
     if remaining <= 0:
-        remaining = REGISTRATION_SECONDS
+        remaining = int(room_chat_settings(room)["timings"]["registration"])
     return registration_text(room) + f"\n\nДо окончания регистрации осталось <b>{remaining}</b> сек."
 
 
@@ -1209,60 +1289,76 @@ def private_role_details_text(role: str) -> str:
     )
 
 
-def private_settings_main_keyboard() -> InlineKeyboardMarkup:
+def private_settings_main_keyboard(chat_id: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
-            [InlineKeyboardButton(text="🎭 Роли", callback_data="psettings:roles")],
-            [InlineKeyboardButton(text="🕐 Тайминги", callback_data="psettings:timings")],
-            [InlineKeyboardButton(text="🙊 Молчанка", callback_data="psettings:mute")],
-            [InlineKeyboardButton(text="🛠 Разное", callback_data="psettings:misc")],
-            [InlineKeyboardButton(text="⬅️ Выход", callback_data="psettings:close")],
+            [InlineKeyboardButton(text="🎭 Роли", callback_data=settings_callback_data(chat_id, "roles"))],
+            [InlineKeyboardButton(text="🕐 Тайминги", callback_data=settings_callback_data(chat_id, "timings"))],
+            [InlineKeyboardButton(text="🙊 Молчанка", callback_data=settings_callback_data(chat_id, "mute"))],
+            [InlineKeyboardButton(text="🛠 Разное", callback_data=settings_callback_data(chat_id, "misc"))],
+            [InlineKeyboardButton(text="⬅️ Выход", callback_data=settings_callback_data(chat_id, "close"))],
         ]
     )
 
 
-def private_settings_roles_keyboard() -> InlineKeyboardMarkup:
+def private_settings_roles_keyboard(chat_id: int) -> InlineKeyboardMarkup:
     rows: list[list[InlineKeyboardButton]] = []
-    for role in SETTINGS_ROLE_OPTIONS:
+    for idx, role in enumerate(SETTINGS_ROLE_OPTIONS):
         emoji = ROLE_EMOJI.get(role, "")
         rows.append(
             [
                 InlineKeyboardButton(
                     text=f"🎭 Роль {emoji} {role}".strip(),
-                    callback_data=f"psettings:role:{role}",
+                    callback_data=settings_callback_data(chat_id, "role", idx),
                 )
             ]
         )
-    rows.append([InlineKeyboardButton(text="⬅️ Назад", callback_data="psettings:main")])
+    rows.append([InlineKeyboardButton(text="⬅️ Назад", callback_data=settings_callback_data(chat_id, "main"))])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
-def private_settings_role_toggle_keyboard(role: str) -> InlineKeyboardMarkup:
-    current = SETTINGS_ROLE_TOGGLES.get(role, True)
+def private_settings_role_toggle_keyboard(chat_id: int, settings: dict, role_index: int) -> InlineKeyboardMarkup:
+    role = SETTINGS_ROLE_OPTIONS[role_index]
+    current = bool(settings.get("roles", {}).get(role, True))
     return InlineKeyboardMarkup(
         inline_keyboard=[
-            [InlineKeyboardButton(text=f"Да {selected_square(current)}", callback_data=f"psettings:role_set:{role}:1")],
-            [InlineKeyboardButton(text=f"Нет {selected_square(not current)}", callback_data=f"psettings:role_set:{role}:0")],
-            [InlineKeyboardButton(text="⬅️ Назад", callback_data="psettings:roles")],
+            [InlineKeyboardButton(text=f"Да {selected_square(current)}", callback_data=settings_callback_data(chat_id, "role_set", role_index, 1))],
+            [InlineKeyboardButton(text=f"Нет {selected_square(not current)}", callback_data=settings_callback_data(chat_id, "role_set", role_index, 0))],
+            [InlineKeyboardButton(text="⬅️ Назад", callback_data=settings_callback_data(chat_id, "roles"))],
         ]
     )
 
 
-def private_settings_timings_keyboard() -> InlineKeyboardMarkup:
+def private_settings_roles_text() -> str:
+    return (
+        "Какую роль вы хотите настроить?\n\n"
+        "Если отключить какую-либо роль, вместо неё будет добавлен Мирный житель."
+    )
+
+
+def private_settings_role_toggle_text(role: str) -> str:
+    emoji = ROLE_EMOJI.get(role, "")
+    return (
+        f"Требуется ли включить роль {emoji} {role}?\n\n"
+        "Если отключить эту роль, вместо неё будет добавлен Мирный житель."
+    ).strip()
+
+
+def private_settings_timings_keyboard(chat_id: int) -> InlineKeyboardMarkup:
     rows = [
-        [InlineKeyboardButton(text=f"🕐 {SETTINGS_TIMING_LABELS['registration']}", callback_data="psettings:timing:registration")],
-        [InlineKeyboardButton(text=f"🕐 {SETTINGS_TIMING_LABELS['night']}", callback_data="psettings:timing:night")],
-        [InlineKeyboardButton(text=f"🕐 {SETTINGS_TIMING_LABELS['day']}", callback_data="psettings:timing:day")],
-        [InlineKeyboardButton(text=f"🕐 {SETTINGS_TIMING_LABELS['vote']}", callback_data="psettings:timing:vote")],
-        [InlineKeyboardButton(text=f"🕐 {SETTINGS_TIMING_LABELS['trial']}", callback_data="psettings:timing:trial")],
-        [InlineKeyboardButton(text="🕐 Ограничение выхода", callback_data="psettings:leave")],
-        [InlineKeyboardButton(text="⬅️ Назад", callback_data="psettings:main")],
+        [InlineKeyboardButton(text=f"🕐 {SETTINGS_TIMING_LABELS['registration']}", callback_data=settings_callback_data(chat_id, "timing", "registration"))],
+        [InlineKeyboardButton(text=f"🕐 {SETTINGS_TIMING_LABELS['night']}", callback_data=settings_callback_data(chat_id, "timing", "night"))],
+        [InlineKeyboardButton(text=f"🕐 {SETTINGS_TIMING_LABELS['day']}", callback_data=settings_callback_data(chat_id, "timing", "day"))],
+        [InlineKeyboardButton(text=f"🕐 {SETTINGS_TIMING_LABELS['vote']}", callback_data=settings_callback_data(chat_id, "timing", "vote"))],
+        [InlineKeyboardButton(text=f"🕐 {SETTINGS_TIMING_LABELS['trial']}", callback_data=settings_callback_data(chat_id, "timing", "trial"))],
+        [InlineKeyboardButton(text="🕐 Ограничение выхода", callback_data=settings_callback_data(chat_id, "leave"))],
+        [InlineKeyboardButton(text="⬅️ Назад", callback_data=settings_callback_data(chat_id, "main"))],
     ]
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
-def private_settings_timing_values_keyboard(key: str) -> InlineKeyboardMarkup:
-    current = current_settings_timing_value(key)
+def private_settings_timing_values_keyboard(chat_id: int, settings: dict, key: str) -> InlineKeyboardMarkup:
+    current = current_settings_timing_value(settings, key)
     rows: list[list[InlineKeyboardButton]] = []
     for index in range(0, len(SETTINGS_TIMING_OPTIONS), 2):
         row: list[InlineKeyboardButton] = []
@@ -1270,59 +1366,60 @@ def private_settings_timing_values_keyboard(key: str) -> InlineKeyboardMarkup:
             row.append(
                 InlineKeyboardButton(
                     text=f"{value} {selected_square(value == current)}",
-                    callback_data=f"psettings:timing_set:{key}:{value}",
+                    callback_data=settings_callback_data(chat_id, "timing_set", key, value),
                 )
             )
         rows.append(row)
-    rows.append([InlineKeyboardButton(text="⬅️ Назад", callback_data="psettings:timings")])
+    rows.append([InlineKeyboardButton(text="⬅️ Назад", callback_data=settings_callback_data(chat_id, "timings"))])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
-def private_settings_mute_keyboard() -> InlineKeyboardMarkup:
+def private_settings_mute_keyboard(chat_id: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
-            [InlineKeyboardButton(text="🙊 Для убитых", callback_data="psettings:mute_item:dead")],
-            [InlineKeyboardButton(text="🙊 Для спящих", callback_data="psettings:mute_item:sleeping")],
-            [InlineKeyboardButton(text="🙊 Для неиграющих", callback_data="psettings:mute_item:outsiders")],
-            [InlineKeyboardButton(text="⬅️ Назад", callback_data="psettings:main")],
+            [InlineKeyboardButton(text="🙊 Для убитых", callback_data=settings_callback_data(chat_id, "mute_item", "dead"))],
+            [InlineKeyboardButton(text="🙊 Для спящих", callback_data=settings_callback_data(chat_id, "mute_item", "sleeping"))],
+            [InlineKeyboardButton(text="🙊 Для неиграющих", callback_data=settings_callback_data(chat_id, "mute_item", "outsiders"))],
+            [InlineKeyboardButton(text="⬅️ Назад", callback_data=settings_callback_data(chat_id, "main"))],
         ]
     )
 
 
-def private_settings_mute_toggle_keyboard(key: str) -> InlineKeyboardMarkup:
-    current = current_settings_mute_value(key)
+def private_settings_mute_toggle_keyboard(chat_id: int, settings: dict, key: str) -> InlineKeyboardMarkup:
+    current = current_settings_mute_value(settings, key)
     return InlineKeyboardMarkup(
         inline_keyboard=[
-            [InlineKeyboardButton(text=f"Да {selected_square(current)}", callback_data=f"psettings:mute_set:{key}:1")],
-            [InlineKeyboardButton(text=f"Нет {selected_square(not current)}", callback_data=f"psettings:mute_set:{key}:0")],
-            [InlineKeyboardButton(text="⬅️ Назад", callback_data="psettings:mute")],
+            [InlineKeyboardButton(text=f"Да {selected_square(current)}", callback_data=settings_callback_data(chat_id, "mute_set", key, 1))],
+            [InlineKeyboardButton(text=f"Нет {selected_square(not current)}", callback_data=settings_callback_data(chat_id, "mute_set", key, 0))],
+            [InlineKeyboardButton(text="⬅️ Назад", callback_data=settings_callback_data(chat_id, "mute"))],
         ]
     )
 
 
-def private_settings_misc_keyboard() -> InlineKeyboardMarkup:
+def private_settings_misc_keyboard(chat_id: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
-            [InlineKeyboardButton(text="🚪 Ограничение выхода", callback_data="psettings:leave")],
-            [InlineKeyboardButton(text="⬅️ Назад", callback_data="psettings:main")],
+            [InlineKeyboardButton(text="🚪 Ограничение выхода", callback_data=settings_callback_data(chat_id, "leave"))],
+            [InlineKeyboardButton(text="⬅️ Назад", callback_data=settings_callback_data(chat_id, "main"))],
         ]
     )
 
 
-def private_settings_leave_keyboard() -> InlineKeyboardMarkup:
+def private_settings_leave_keyboard(chat_id: int, settings: dict) -> InlineKeyboardMarkup:
     rows: list[list[InlineKeyboardButton]] = []
+    current = int(settings.get("leave_restriction_seconds", LEAVE_RESTRICTION_SECONDS))
     for index in range(0, len(SETTINGS_LEAVE_OPTIONS), 2):
         row: list[InlineKeyboardButton] = []
         for value in SETTINGS_LEAVE_OPTIONS[index:index + 2]:
             label = format_leave_duration(value)
             row.append(
                 InlineKeyboardButton(
-                    text=f"{label} {selected_square(value == LEAVE_RESTRICTION_SECONDS)}",
-                    callback_data=f"psettings:leave_set:{value}",
+                    text=f"{label} {selected_square(value == current)}",
+                    callback_data=settings_callback_data(chat_id, "leave_set", value),
                 )
             )
         rows.append(row)
-    rows.append([InlineKeyboardButton(text="⬅️ Назад", callback_data="psettings:misc")])
+    rows.append([InlineKeyboardButton(text="⬅️ Назад", callback_data=settings_callback_data(chat_id, "misc"))])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
@@ -1653,7 +1750,7 @@ def night_status_text(room) -> str:
         else:
             lines.append(f"{seat_no}. <a href=\"tg://user?id={player.user_id}\">{safe_name}</a>")
 
-    lines.append(f"\n<b>Спать осталось {format_sleep_left(NIGHT_PHASE_SECONDS)}</b>")
+    lines.append(f"\n<b>Спать осталось {format_sleep_left(int(room_chat_settings(room)['timings']['night']))}</b>")
     return "\n".join(lines)
 
 
@@ -1984,7 +2081,7 @@ async def process_day_end(bot: Bot, chat_id: int, timer_reason: str | None = Non
                 chat_id,
                 (
                     "<b>Пришло время определить и наказать виновных.</b>\n"
-                    f"Голосование продлится {DAY_NOMINATION_SECONDS} секунд"
+                    f"Голосование продлится {int(room_chat_settings(room)['timings']['vote'])} секунд"
                 ),
                 reply_markup=private_keyboard,
             )
@@ -2204,9 +2301,10 @@ async def start_phase_timer(
 ) -> None:
     cancel_phase_timer(room.chat_id)
 
-    phase_duration = NIGHT_PHASE_SECONDS
+    settings = room_chat_settings(room)
+    phase_duration = int(settings["timings"]["night"])
     if room.phase == "night":
-        phase_duration = NIGHT_PHASE_SECONDS
+        phase_duration = int(settings["timings"]["night"])
     elif room.phase == "day":
         phase_duration = current_day_stage_seconds(room)
     else:
@@ -2234,6 +2332,7 @@ async def start_phase_timer(
 
 async def restore_runtime_state(bot: Bot) -> None:
     for room in storage.rooms.values():
+        apply_room_settings(room, room.settings)
         if not room.started and room.registration_open:
             remaining = registration_remaining_seconds(room)
             if remaining <= 0:
@@ -2251,7 +2350,7 @@ async def restore_runtime_state(bot: Bot) -> None:
         base_duration = room.phase_duration_seconds
         if base_duration is None or base_duration <= 0:
             if room.phase == PHASE_NIGHT:
-                base_duration = NIGHT_PHASE_SECONDS
+                base_duration = int(room_chat_settings(room)["timings"]["night"])
             else:
                 base_duration = current_day_stage_seconds(room)
 
@@ -2512,11 +2611,12 @@ async def cmd_settings(message: Message) -> None:
         )
         return
 
+    settings = load_chat_settings(message.chat.id)
     try:
         await message.bot.send_message(
             message.from_user.id,
             "Какие параметры вы хотите изменить?",
-            reply_markup=private_settings_main_keyboard(),
+            reply_markup=private_settings_main_keyboard(message.chat.id),
         )
     except Exception:
         await message.answer("Не смог отправить настройки в ЛС. Напиши боту /start в личку и попробуй снова.")
@@ -2611,6 +2711,7 @@ async def cmd_create(message: Message) -> None:
         return
 
     room.chat_title = message.chat.title or "Групповой чат"
+    apply_room_settings(room, load_chat_settings(message.chat.id))
     room.players.clear()
     room.open_registration()
     persist_room(room)
@@ -2623,7 +2724,7 @@ async def cmd_create(message: Message) -> None:
     room.registration_message_id = sent.message_id
     persist_room(room)
     await pin_registration_post(message.bot, room)
-    await start_registration_timer(room, message.bot, REGISTRATION_SECONDS)
+    await start_registration_timer(room, message.bot, int(room_chat_settings(room)["timings"]["registration"]))
 
 
 @router.message(Command("join"))
@@ -2820,9 +2921,10 @@ async def on_registration_action(callback: CallbackQuery) -> None:
             room = storage.get_room(chat_id)
 
         room.chat_title = callback.message.chat.title or "Групповой чат"
+        apply_room_settings(room, load_chat_settings(chat_id))
         room.open_registration()
         persist_room(room)
-        await start_registration_timer(room, callback.bot, REGISTRATION_SECONDS)
+        await start_registration_timer(room, callback.bot, int(room_chat_settings(room)["timings"]["registration"]))
         join_link = await registration_join_link(callback.message, chat_id)
         sent = await callback.message.answer(
             registration_post_text(room),
@@ -3546,9 +3648,6 @@ async def on_private_menu_callback(callback: CallbackQuery) -> None:
 
 @router.callback_query(F.data.startswith("psettings:"))
 async def on_private_settings_callback(callback: CallbackQuery) -> None:
-    global NIGHT_PHASE_SECONDS, DAY_DISCUSSION_SECONDS, DAY_NOMINATION_SECONDS, DAY_TRIAL_SECONDS, REGISTRATION_SECONDS
-    global MUTE_DEAD_PLAYERS, MUTE_SLEEPING_PLAYERS, MUTE_NON_PLAYERS, LEAVE_RESTRICTION_SECONDS
-
     async def safe_answer(text: str | None = None, show_alert: bool = False) -> None:
         try:
             if text is None:
@@ -3574,10 +3673,19 @@ async def on_private_settings_callback(callback: CallbackQuery) -> None:
             await callback.message.answer(text, reply_markup=keyboard)
 
     parts = callback.data.split(":")
-    action = parts[1] if len(parts) > 1 else ""
+    if len(parts) < 3:
+        await safe_answer("Неизвестный пункт настроек.", show_alert=True)
+        return
+    try:
+        chat_id = int(parts[1])
+    except ValueError:
+        await safe_answer("Некорректный чат настроек.", show_alert=True)
+        return
+    action = parts[2]
+    settings = load_chat_settings(chat_id)
 
     if action == "main":
-        await show_settings_screen("Какие параметры вы хотите изменить?", private_settings_main_keyboard())
+        await show_settings_screen("Какие параметры вы хотите изменить?", private_settings_main_keyboard(chat_id))
         await safe_answer()
         return
 
@@ -3591,123 +3699,127 @@ async def on_private_settings_callback(callback: CallbackQuery) -> None:
         return
 
     if action == "roles":
-        await show_settings_screen("Какую роль вы хотите настроить?", private_settings_roles_keyboard())
+        await show_settings_screen(private_settings_roles_text(), private_settings_roles_keyboard(chat_id))
         await safe_answer()
         return
 
-    if action == "role" and len(parts) == 3:
-        role = parts[2]
-        emoji = ROLE_EMOJI.get(role, "")
+    if action == "role" and len(parts) == 4:
+        try:
+            role_index = int(parts[3])
+        except ValueError:
+            await safe_answer("Некорректная роль.", show_alert=True)
+            return
+        if role_index < 0 or role_index >= len(SETTINGS_ROLE_OPTIONS):
+            await safe_answer("Роль не найдена.", show_alert=True)
+            return
+        role = SETTINGS_ROLE_OPTIONS[role_index]
         await show_settings_screen(
-            f"Требуется ли включить роль {emoji} {role}?".strip(),
-            private_settings_role_toggle_keyboard(role),
+            private_settings_role_toggle_text(role),
+            private_settings_role_toggle_keyboard(chat_id, settings, role_index),
         )
         await safe_answer()
         return
 
-    if action == "role_set" and len(parts) == 4:
-        role = parts[2]
-        SETTINGS_ROLE_TOGGLES[role] = parts[3] == "1"
-        emoji = ROLE_EMOJI.get(role, "")
+    if action == "role_set" and len(parts) == 5:
+        try:
+            role_index = int(parts[3])
+        except ValueError:
+            await safe_answer("Некорректная роль.", show_alert=True)
+            return
+        if role_index < 0 or role_index >= len(SETTINGS_ROLE_OPTIONS):
+            await safe_answer("Роль не найдена.", show_alert=True)
+            return
+        role = SETTINGS_ROLE_OPTIONS[role_index]
+        settings["roles"][role] = parts[4] == "1"
+        settings = save_chat_settings(chat_id, settings)
         await show_settings_screen(
-            f"Требуется ли включить роль {emoji} {role}?".strip(),
-            private_settings_role_toggle_keyboard(role),
+            private_settings_role_toggle_text(role),
+            private_settings_role_toggle_keyboard(chat_id, settings, role_index),
         )
         await safe_answer("Сохранено")
         return
 
     if action == "timings":
-        await show_settings_screen("Выберите какие тайминги необходимо изменить:", private_settings_timings_keyboard())
+        await show_settings_screen("Выберите какие тайминги необходимо изменить:", private_settings_timings_keyboard(chat_id))
         await safe_answer()
         return
 
-    if action == "timing" and len(parts) == 3:
-        key = parts[2]
+    if action == "timing" and len(parts) == 4:
+        key = parts[3]
         title = SETTINGS_TIMING_TITLES.get(key)
         if title is None:
             await safe_answer("Неизвестный тайминг.", show_alert=True)
             return
-        await show_settings_screen(title, private_settings_timing_values_keyboard(key))
+        await show_settings_screen(title, private_settings_timing_values_keyboard(chat_id, settings, key))
         await safe_answer()
         return
 
-    if action == "timing_set" and len(parts) == 4:
-        key = parts[2]
+    if action == "timing_set" and len(parts) == 5:
+        key = parts[3]
         try:
-            value = int(parts[3])
+            value = int(parts[4])
         except ValueError:
             await safe_answer("Некорректное значение.", show_alert=True)
             return
-        if key == "registration":
-            REGISTRATION_SECONDS = value
-        elif key == "night":
-            NIGHT_PHASE_SECONDS = value
-        elif key == "day":
-            DAY_DISCUSSION_SECONDS = value
-        elif key == "vote":
-            DAY_NOMINATION_SECONDS = value
-        elif key == "trial":
-            DAY_TRIAL_SECONDS = value
-        else:
+        if key not in settings["timings"]:
             await safe_answer("Неизвестный тайминг.", show_alert=True)
             return
-        await show_settings_screen(SETTINGS_TIMING_TITLES[key], private_settings_timing_values_keyboard(key))
+        settings["timings"][key] = value
+        settings = save_chat_settings(chat_id, settings)
+        await show_settings_screen(SETTINGS_TIMING_TITLES[key], private_settings_timing_values_keyboard(chat_id, settings, key))
         await safe_answer("Сохранено")
         return
 
     if action == "mute":
-        await show_settings_screen("Отключение возможности писать сообщения в чате", private_settings_mute_keyboard())
+        await show_settings_screen("Отключение возможности писать сообщения в чате", private_settings_mute_keyboard(chat_id))
         await safe_answer()
         return
 
-    if action == "mute_item" and len(parts) == 3:
-        key = parts[2]
+    if action == "mute_item" and len(parts) == 4:
+        key = parts[3]
         title = SETTINGS_MUTE_TITLES.get(key)
         if title is None:
             await safe_answer("Неизвестный параметр.", show_alert=True)
             return
-        await show_settings_screen(title, private_settings_mute_toggle_keyboard(key))
+        await show_settings_screen(title, private_settings_mute_toggle_keyboard(chat_id, settings, key))
         await safe_answer()
         return
 
-    if action == "mute_set" and len(parts) == 4:
-        key = parts[2]
-        value = parts[3] == "1"
-        if key == "dead":
-            MUTE_DEAD_PLAYERS = value
-        elif key == "sleeping":
-            MUTE_SLEEPING_PLAYERS = value
-        elif key == "outsiders":
-            MUTE_NON_PLAYERS = value
-        else:
+    if action == "mute_set" and len(parts) == 5:
+        key = parts[3]
+        value = parts[4] == "1"
+        if key not in settings["mute"]:
             await safe_answer("Неизвестный параметр.", show_alert=True)
             return
-        await show_settings_screen(SETTINGS_MUTE_TITLES[key], private_settings_mute_toggle_keyboard(key))
+        settings["mute"][key] = value
+        settings = save_chat_settings(chat_id, settings)
+        await show_settings_screen(SETTINGS_MUTE_TITLES[key], private_settings_mute_toggle_keyboard(chat_id, settings, key))
         await safe_answer("Сохранено")
         return
 
     if action == "misc":
-        await show_settings_screen("Что вы хотите изменить?", private_settings_misc_keyboard())
+        await show_settings_screen("Что вы хотите изменить?", private_settings_misc_keyboard(chat_id))
         await safe_answer()
         return
 
     if action == "leave":
         await show_settings_screen(
             "Выберите длительность, в течение которой пользователь не сможет присоединяться к игре, если он досрочно покинул предыдущую игру.",
-            private_settings_leave_keyboard(),
+            private_settings_leave_keyboard(chat_id, settings),
         )
         await safe_answer()
         return
 
-    if action == "leave_set" and len(parts) == 3:
+    if action == "leave_set" and len(parts) == 4:
         try:
-            LEAVE_RESTRICTION_SECONDS = int(parts[2])
+            settings["leave_restriction_seconds"] = int(parts[3])
         except ValueError:
             await safe_answer("Некорректное значение.", show_alert=True)
             return
+        settings = save_chat_settings(chat_id, settings)
         await show_settings_screen(
             "Выберите длительность, в течение которой пользователь не сможет присоединяться к игре, если он досрочно покинул предыдущую игру.",
-            private_settings_leave_keyboard(),
+            private_settings_leave_keyboard(chat_id, settings),
         )
         await safe_answer("Сохранено")
         return
@@ -3865,44 +3977,46 @@ async def enforce_group_game_rules(message: Message) -> None:
         return
 
     if room.phase == PHASE_NIGHT:
+        mute_settings = room_chat_settings(room)["mute"]
         if is_participant and not is_alive_player:
-            if MUTE_DEAD_PLAYERS:
+            if bool(mute_settings["dead"]):
                 await safe_delete_message(message)
                 await process_rule_violation(message)
             return
 
         # At night, participants are muted without penalties to avoid blocking gameplay.
         if is_participant:
-            if MUTE_SLEEPING_PLAYERS and not (is_alive_player and is_command):
+            if bool(mute_settings["sleeping"]) and not (is_alive_player and is_command):
                 await safe_delete_message(message)
             return
 
         # Non-participants still receive regular penalties.
-        if MUTE_NON_PLAYERS and not (is_alive_player and is_command):
+        if bool(mute_settings["outsiders"]) and not (is_alive_player and is_command):
             await safe_delete_message(message)
             await process_rule_violation(message)
         return
 
     if room.phase == PHASE_DAY:
+        mute_settings = room_chat_settings(room)["mute"]
         # Silenced by mistress effect: messages are deleted for this day without penalty escalation.
         if room.day_silenced_user_id is not None and message.from_user.id == room.day_silenced_user_id:
             await safe_delete_message(message)
             return
 
         if is_participant and not is_alive_player:
-            if MUTE_DEAD_PLAYERS:
+            if bool(mute_settings["dead"]):
                 await safe_delete_message(message)
                 await process_rule_violation(message)
             return
 
         if not is_participant:
-            if MUTE_NON_PLAYERS:
+            if bool(mute_settings["outsiders"]):
                 await safe_delete_message(message)
                 await process_rule_violation(message)
             return
 
         # At day, only alive players can speak in the group chat.
-        if not is_alive_player and MUTE_DEAD_PLAYERS:
+        if not is_alive_player and bool(mute_settings["dead"]):
             await safe_delete_message(message)
             await process_rule_violation(message)
         return

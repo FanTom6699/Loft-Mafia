@@ -162,6 +162,15 @@ ROLE_PLAN_BY_COUNT: dict[int, list[str]] = {
     20: [ROLE_DON, ROLE_MAFIA, ROLE_MAFIA, ROLE_MAFIA, ROLE_MAFIA, ROLE_MAFIA, ROLE_DOCTOR, ROLE_COMMISSAR, ROLE_LUCKY, ROLE_BUM, ROLE_KAMIKAZE, ROLE_MISTRESS, ROLE_SERGEANT, ROLE_MANIAC, ROLE_ADVOCATE, ROLE_CITIZEN, ROLE_CITIZEN, ROLE_CITIZEN, ROLE_CITIZEN, ROLE_CITIZEN],
 }
 
+def apply_role_toggles(roles: list[str], role_toggles: dict[str, bool] | None = None) -> list[str]:
+    adjusted_roles: list[str] = []
+    for role in roles:
+        if role_toggles is not None and role in role_toggles and not bool(role_toggles.get(role, True)):
+            adjusted_roles.append(ROLE_CITIZEN)
+            continue
+        adjusted_roles.append(role)
+    return adjusted_roles
+
 
 @dataclass
 class Player:
@@ -175,6 +184,7 @@ class Player:
 class GameRoom:
     chat_id: int
     host_id: int
+    settings: dict = field(default_factory=dict)
 
     def commissar_check_result_text(self, checked_player) -> str:
         role = checked_player.role
@@ -300,7 +310,7 @@ class GameRoom:
 
     def assign_roles(self) -> None:
         count = len(self.players)
-        roles = self.build_roles(count)
+        roles = self.build_roles(count, self.settings)
         random.shuffle(roles)
 
         for player, role in zip(self.players.values(), roles):
@@ -347,12 +357,13 @@ class GameRoom:
         self.started_at = datetime.now()
 
     @staticmethod
-    def build_roles(count: int) -> list[str]:
+    def build_roles(count: int, settings: dict | None = None) -> list[str]:
+        role_toggles = dict((settings or {}).get("roles", {}))
         if count in ROLE_PLAN_BY_COUNT:
-            return ROLE_PLAN_BY_COUNT[count].copy()
+            return apply_role_toggles(ROLE_PLAN_BY_COUNT[count].copy(), role_toggles)
 
         if count < MIN_PLAYERS:
-            return [ROLE_DON, ROLE_COMMISSAR, ROLE_DOCTOR, ROLE_CITIZEN][:count]
+            return apply_role_toggles([ROLE_DON, ROLE_COMMISSAR, ROLE_DOCTOR, ROLE_CITIZEN][:count], role_toggles)
 
         # For groups above 20, keep scaling with a close mafia/civil ratio.
         roles = ROLE_PLAN_BY_COUNT[20].copy()
@@ -363,7 +374,7 @@ class GameRoom:
                 roles.append(ROLE_MAFIA)
             else:
                 roles.append(ROLE_CITIZEN)
-        return roles
+        return apply_role_toggles(roles, role_toggles)
 
     def get_player(self, user_id: int) -> Player | None:
         return self.players.get(user_id)

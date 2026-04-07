@@ -67,6 +67,15 @@ class GameStateRepository:
                 )
                 """
             )
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS chat_settings (
+                    chat_id INTEGER PRIMARY KEY,
+                    payload TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                )
+                """
+            )
             conn.commit()
 
     @staticmethod
@@ -88,6 +97,7 @@ class GameStateRepository:
             "chat_id": room.chat_id,
             "host_id": room.host_id,
             "chat_title": room.chat_title,
+            "settings": room.settings,
             "players": {
                 str(user_id): {
                     "user_id": player.user_id,
@@ -149,6 +159,7 @@ class GameStateRepository:
             chat_id=int(payload["chat_id"]),
             host_id=int(payload["host_id"]),
             chat_title=payload.get("chat_title", ""),
+            settings=dict(payload.get("settings", {}) or {}),
         )
 
         players_payload = payload.get("players", {})
@@ -375,6 +386,35 @@ class GameStateRepository:
                 (user_id,),
             ).fetchone()
         return row is not None
+
+    def get_chat_settings(self, chat_id: int) -> dict | None:
+        with sqlite3.connect(self.db_path) as conn:
+            row = conn.execute(
+                "SELECT payload FROM chat_settings WHERE chat_id = ?",
+                (chat_id,),
+            ).fetchone()
+        if row is None:
+            return None
+        try:
+            return json.loads(row[0])
+        except Exception:
+            return None
+
+    def save_chat_settings(self, chat_id: int, settings: dict) -> None:
+        encoded = json.dumps(settings, ensure_ascii=False)
+        now = datetime.now().isoformat()
+        with sqlite3.connect(self.db_path) as conn:
+            conn.execute(
+                """
+                INSERT INTO chat_settings(chat_id, payload, updated_at)
+                VALUES(?, ?, ?)
+                ON CONFLICT(chat_id) DO UPDATE SET
+                    payload = excluded.payload,
+                    updated_at = excluded.updated_at
+                """,
+                (chat_id, encoded, now),
+            )
+            conn.commit()
 
     def save_room(self, room: GameRoom) -> None:
         payload = self._serialize_room(room)
