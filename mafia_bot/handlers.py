@@ -2,13 +2,13 @@ import asyncio
 import os
 import time
 import traceback
-from datetime import datetime
+from datetime import datetime, timedelta
 from html import escape
 
 from aiogram import F, Router
 from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError, TelegramRetryAfter
 from aiogram.filters import Command, CommandObject, CommandStart
-from aiogram.types import CallbackQuery, FSInputFile, InlineKeyboardButton, InlineKeyboardMarkup, Message, User
+from aiogram.types import CallbackQuery, ChatPermissions, FSInputFile, InlineKeyboardButton, InlineKeyboardMarkup, Message, User
 from aiogram import Bot
 
 from mafia_bot.storage import GameStateRepository
@@ -16,6 +16,7 @@ from mafia_bot.game import (
     DAY_STAGE_DISCUSSION,
     DAY_STAGE_NOMINATION,
     DAY_STAGE_TRIAL,
+    MAFIA_ROLES,
     MIN_PLAYERS,
     PHASE_DAY,
     PHASE_FINISHED,
@@ -73,6 +74,7 @@ chat_penalties: dict[int, dict[int, dict[str, float | int | bool]]] = {}
 action_menu_messages: dict[int, dict[int, int]] = {}
 delete_permission_alerted_chats: set[int] = set()
 OWNER_USER_ID = 5658493362
+MISTRESS_DAY_BLOCK_TOAST = "Ты под действием Любовницы."
 
 
 def get_phase_lock(chat_id: int) -> asyncio.Lock:
@@ -233,7 +235,7 @@ def skipped_turn_keyboard(chat_id: int) -> InlineKeyboardMarkup:
         inline_keyboard=[
             [
                 InlineKeyboardButton(
-                    text="Ты опоздал...",
+                    text="Пропустить ход",
                     callback_data=f"noop:skip:{chat_id}",
                 )
             ]
@@ -301,7 +303,7 @@ async def mark_skipped_night_menus(bot: Bot, room, skipped_user_ids: list[int]) 
         message_id = get_action_menu_message_id(room.chat_id, user_id)
         if message_id is None:
             continue
-        skipped_text = f"{build_action_prompt_text(room, user_id)}\n\nТы опоздал..."
+        skipped_text = f"{build_action_prompt_text(room, user_id)}\n\nВы пропустили ход."
         try:
             await bot.edit_message_text(
                 chat_id=user_id,
@@ -588,17 +590,14 @@ def format_player_stats_text(stats: dict) -> str:
     games = int(stats.get("games_played", 0))
     wins = int(stats.get("wins", 0))
     losses = int(stats.get("losses", 0))
-    survived = int(stats.get("survived_games", 0))
-    suicide_personal_wins = int(stats.get("suicide_personal_wins", 0))
     mafia_games = int(stats.get("mafia_games", 0))
     maniac_games = int(stats.get("maniac_games", 0))
     civilian_games = int(stats.get("civilian_games", 0))
+    money = int(stats.get("money", 0))
+    tickets = int(stats.get("tickets", 0))
     last_role = str(stats.get("last_role", "") or "-")
     name = str(stats.get("display_name", "Игрок"))
     last_role_mark = role_mark_text(last_role) if last_role != "-" else "-"
-
-    win_rate = (wins / games * 100.0) if games > 0 else 0.0
-    survival_rate = (survived / games * 100.0) if games > 0 else 0.0
 
     return (
         "<b>Твоя статистика</b>\n"
@@ -606,14 +605,76 @@ def format_player_stats_text(stats: dict) -> str:
         f"Игр сыграно: {games}\n"
         f"Побед: {wins}\n"
         f"Поражений: {losses}\n"
-        f"Винрейт: {win_rate:.1f}%\n"
-        f"Выживал до конца: {survived} ({survival_rate:.1f}%)\n"
-        f"Личных побед Самоубийцы: {suicide_personal_wins}\n"
         f"Партий за мафию: {mafia_games}\n"
         f"Партий за маньяка: {maniac_games}\n"
         f"Партий за мирных: {civilian_games}\n"
+        f"💵 Деньги: {money}\n"
+        f"🎟 Билетики: {tickets}\n"
         f"Последняя роль: {last_role_mark}"
     )
+
+
+def format_endgame_currency_text(player, stats: dict, won: bool) -> str:
+    name = escape((player.full_name or "").strip() or f"Игрок {player.user_id}")
+    money = int(stats.get("money", 0))
+    tickets = int(stats.get("tickets", 0))
+    if won:
+        return (
+            "<b>Игра завершена</b>\n"
+            f'За победу в роли "{escape(player.role)}" тебе начислили 💵 10!\n\n'
+            f"👤 {name}\n\n"
+            f"💵 Деньги: {money}\n"
+            f"🎟Билетики: {tickets}"
+        )
+    return (
+        "<b>Игра завершена</b>\n\n"
+        f"👤 {name}\n\n"
+        f"💵 Деньги: {money}\n"
+        f"🎟Билетики: {tickets}"
+    )
+
+
+def format_private_profile_text(display_name: str, stats: dict | None) -> str:
+    safe_name = escape((display_name or "").strip() or "Игрок")
+    games = int((stats or {}).get("games_played", 0))
+    wins = int((stats or {}).get("wins", 0))
+    losses = int((stats or {}).get("losses", 0))
+    money = int((stats or {}).get("money", 0))
+    tickets = int((stats or {}).get("tickets", 0))
+    last_role = str((stats or {}).get("last_role", "") or "-")
+    last_role_mark = role_mark_text(last_role) if last_role != "-" else "-"
+
+    return (
+        "<b>Игровой профиль</b>\n\n"
+        f"👤 {safe_name}\n\n"
+        f"💵 Деньги: {money}\n"
+        f"🎟 Билетики: {tickets}\n"
+        f"🎭 Последняя роль: {last_role_mark}\n"
+        f"🎮 Игр сыграно: {games}\n"
+        f"🏆 Побед: {wins}\n"
+        f"💀 Поражений: {losses}"
+    )
+
+
+async def send_endgame_currency_summaries(bot: Bot, room) -> None:
+    for player in room.players.values():
+        stats = repo.get_player_stats(player.user_id)
+        if stats is None:
+            continue
+        won = False
+        if room.winner_team == "Мафия":
+            won = player.role in MAFIA_ROLES
+        elif room.winner_team == "Маньяк":
+            won = player.role == ROLE_MANIAC
+        elif room.winner_team == "Мирные жители":
+            won = player.role not in MAFIA_ROLES and player.role != ROLE_MANIAC
+        try:
+            await bot.send_message(
+                player.user_id,
+                format_endgame_currency_text(player, stats, won),
+            )
+        except Exception:
+            continue
 
 
 async def notify_missing_delete_permission_once(bot: Bot, chat_id: int) -> None:
@@ -653,6 +714,11 @@ async def safe_delete_message(message: Message) -> None:
 async def cleanup_group_command_message(message: Message) -> None:
     if message.chat.type in {"group", "supergroup"}:
         await safe_delete_message(message)
+
+
+async def delete_message_later(message: Message, delay_seconds: int) -> None:
+    await asyncio.sleep(delay_seconds)
+    await safe_delete_message(message)
 
 
 def get_or_create_penalty(chat_id: int, user_id: int) -> dict[str, float | int | bool]:
@@ -747,6 +813,30 @@ async def process_rule_violation(message: Message) -> None:
     state["blocked_until"] = time.time() + next_block
 
     try:
+        await message.bot.restrict_chat_member(
+            chat_id=chat_id,
+            user_id=user_id,
+            permissions=ChatPermissions(
+                can_send_messages=False,
+                can_send_audios=False,
+                can_send_documents=False,
+                can_send_photos=False,
+                can_send_videos=False,
+                can_send_video_notes=False,
+                can_send_voice_notes=False,
+                can_send_polls=False,
+                can_send_other_messages=False,
+                can_add_web_page_previews=False,
+                can_change_info=False,
+                can_invite_users=False,
+                can_pin_messages=False,
+            ),
+            until_date=datetime.now() + timedelta(seconds=next_block),
+        )
+    except Exception:
+        pass
+
+    try:
         await message.bot.send_message(
             user_id,
             f"Блокировка писать в игровой чат: {next_block} сек.",
@@ -779,6 +869,16 @@ def player_profile_link(player) -> str:
 async def registration_join_link(message: Message, chat_id: int) -> str:
     me = await message.bot.get_me()
     return f"https://t.me/{me.username}?start=join_{chat_id}"
+
+
+async def bot_start_link(bot: Bot) -> str:
+    me = await bot.get_me()
+    return f"https://t.me/{me.username}?start=welcome"
+
+
+async def bot_add_to_chat_link(bot: Bot) -> str:
+    me = await bot.get_me()
+    return f"https://t.me/{me.username}?startgroup=true"
 
 
 def registration_text(room) -> str:
@@ -897,11 +997,15 @@ def registration_panel() -> InlineKeyboardMarkup:
     )
 
 
-def private_main_menu_keyboard() -> InlineKeyboardMarkup:
+def private_main_menu_keyboard(add_to_chat_link: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
-            [InlineKeyboardButton(text="Список ролей", callback_data="pmenu:roles")],
-            [InlineKeyboardButton(text="Статистика", callback_data="pmenu:stats")],
+            [InlineKeyboardButton(text="➕ Добавить бота в чат", url=add_to_chat_link)],
+            [
+                InlineKeyboardButton(text="👤 Игровой профиль", callback_data="pmenu:profile"),
+                InlineKeyboardButton(text="🎭 Роли", callback_data="pmenu:roles"),
+            ],
+            [InlineKeyboardButton(text="📊 Статистика", callback_data="pmenu:stats")],
         ]
     )
 
@@ -1039,7 +1143,7 @@ def build_action_keyboard(room, actor_user_id: int) -> InlineKeyboardMarkup | No
             inline_keyboard=[
                 [
                     InlineKeyboardButton(
-                        text="Ты под действием Любовницы",
+                        text="Пока все голосуют - ты лечишься...",
                         callback_data="noop:silenced",
                     )
                 ]
@@ -1252,7 +1356,7 @@ def build_action_prompt_text(room, actor_user_id: int) -> str:
 
     if room.phase == "day" and room.day_stage == DAY_STAGE_NOMINATION:
         if room.day_silenced_user_id is not None and actor.user_id == room.day_silenced_user_id:
-            return "Ты под действием Любовницы и не можешь голосовать сегодня."
+            return "Пока все голосуют - ты лечишься. 💃🏼 Любовница постаралась..."
         return "Пришло время искать виноватых!\nКого ты хочешь линчевать?"
 
     return "Выбери действие на текущую фазу:"
@@ -1567,7 +1671,10 @@ async def process_night_end(bot: Bot, chat_id: int, timer_reason: str | None = N
 
         if room.phase == PHASE_FINISHED:
             room.pending_last_words.clear()
+            stats_already_recorded = room.stats_recorded
             ensure_stats_recorded(room)
+            if not stats_already_recorded:
+                await send_endgame_currency_summaries(bot, room)
             await bot.send_message(chat_id, room.final_report_text())
             cancel_phase_timer(chat_id)
             persist_room(room)
@@ -1771,7 +1878,10 @@ async def process_day_end(bot: Bot, chat_id: int, timer_reason: str | None = Non
 
             if room.phase == PHASE_FINISHED:
                 room.pending_last_words.clear()
+                stats_already_recorded = room.stats_recorded
                 ensure_stats_recorded(room)
+                if not stats_already_recorded:
+                    await send_endgame_currency_summaries(bot, room)
                 await safe_send_message(bot, chat_id, room.final_report_text())
                 cancel_phase_timer(chat_id)
                 persist_room(room)
@@ -2033,16 +2143,14 @@ async def cmd_start(message: Message, command: CommandObject) -> None:
         return
 
     if message.chat.type == "private":
-        keyboard = private_main_menu_keyboard()
+        add_to_chat_link = await bot_add_to_chat_link(message.bot)
+        keyboard = private_main_menu_keyboard(add_to_chat_link)
         if is_private_first_visit:
             text = (
-                "<b>Добро пожаловать в бота Мафии</b>\n\n"
-                f"👋 Привет, {nickname}!\n\n"
-                "<b>В этом чате ты можешь:</b>\n"
-                "• Получать роль и задания по фазам\n"
-                "• Делать ходы кнопками\n"
-                "• Смотреть роли и статистику\n\n"
-                "Найди лобби в группе и присоединяйся."
+                f"<b>Привет, {nickname}! 👋</b>\n\n"
+                "Добро пожаловать в <b>Loft Mafia Bot</b> 🎭\n\n"
+                "Здесь ты будешь получать роль, делать ходы и смотреть свой игровой профиль.\n\n"
+                "Чтобы начать игру, сначала добавь бота в чат кнопкой ниже."
             )
         else:
             text = (
@@ -2054,6 +2162,28 @@ async def cmd_start(message: Message, command: CommandObject) -> None:
             reply_markup=keyboard,
         )
         return
+
+
+@router.message(F.chat.type.in_({"group", "supergroup"}), F.new_chat_members)
+async def on_new_chat_members(message: Message) -> None:
+    members = [member for member in (message.new_chat_members or []) if not member.is_bot]
+    if not members:
+        return
+
+    start_link = await bot_start_link(message.bot)
+    for member in members:
+        safe_name = escape(user_nickname(member))
+        sent = await message.answer(
+            (
+                f"Привет, {safe_name} 👋\n"
+                "Добро пожаловать в <b>Loft Mafia Bot</b> 🎭\n\n"
+                "❗️Перед началом игры просим ознакомиться с правилами — @rules_loft ❗️\n\n"
+                "🎮 Чтобы начать игру, нажми:\n"
+                f"👉 <a href=\"{start_link}\">Начать в боте</a>\n\n"
+                "🤍 Прекрасных игр вам и хорошего настроения! 🤍"
+            )
+        )
+        asyncio.create_task(delete_message_later(sent, 60))
 
 @router.message(Command("roles"))
 async def cmd_roles(message: Message) -> None:
@@ -2086,7 +2216,14 @@ async def cmd_stats(message: Message) -> None:
 @router.message(Command("profile"))
 async def cmd_profile(message: Message) -> None:
     await cleanup_group_command_message(message)
-    await message.answer("Профиль отключен. Используй меню ролей и статистики.")
+    if message.chat.type != "private":
+        await message.answer("Профиль доступен в ЛС бота.")
+        return
+    stats = repo.get_player_stats(message.from_user.id)
+    await message.answer(
+        format_private_profile_text(user_nickname(message.from_user), stats),
+        reply_markup=private_back_to_menu_keyboard(),
+    )
 
 
 @router.message(Command("action"))
@@ -2223,7 +2360,10 @@ async def cmd_leave(message: Message) -> None:
             pass
 
         if room.phase == PHASE_FINISHED:
+            stats_already_recorded = room.stats_recorded
             ensure_stats_recorded(room)
+            if not stats_already_recorded:
+                await send_endgame_currency_summaries(message.bot, room)
             await message.answer(room.final_report_text())
             cancel_phase_timer(message.chat.id)
 
@@ -2503,52 +2643,6 @@ async def cmd_id(message: Message) -> None:
     await message.answer("Не удалось определить ID.")
 
 
-@router.message(Command("kill"))
-async def cmd_kill(message: Message) -> None:
-    await cleanup_group_command_message(message)
-    await send_action_menu(message)
-
-
-@router.message(Command("heal"))
-async def cmd_heal(message: Message) -> None:
-    await cleanup_group_command_message(message)
-    await send_action_menu(message)
-
-
-@router.message(Command("check"))
-async def cmd_check(message: Message) -> None:
-    await cleanup_group_command_message(message)
-    await send_action_menu(message)
-
-
-@router.message(Command("night_end"))
-async def cmd_night_end(message: Message) -> None:
-    await cleanup_group_command_message(message)
-    room = storage.get_room(message.chat.id)
-    if room is None:
-        await message.answer("Лобби не найдено.")
-        return
-
-    await process_night_end(message.bot, message.chat.id)
-
-
-@router.message(Command("vote"))
-async def cmd_vote(message: Message) -> None:
-    await cleanup_group_command_message(message)
-    await send_action_menu(message)
-
-
-@router.message(Command("day_end"))
-async def cmd_day_end(message: Message) -> None:
-    await cleanup_group_command_message(message)
-    room = storage.get_room(message.chat.id)
-    if room is None:
-        await message.answer("Лобби не найдено.")
-        return
-
-    await process_day_end(message.bot, message.chat.id)
-
-
 @router.callback_query(F.data.startswith("trial:"))
 async def on_trial_callback(callback: CallbackQuery) -> None:
     try:
@@ -2582,14 +2676,18 @@ async def on_trial_callback(callback: CallbackQuery) -> None:
 
         voter = room.get_player(callback.from_user.id)
         if voter is None or not voter.alive:
-            await callback.answer("Ты не участвуешь в этом голосовании.", show_alert=True)
+            await callback.answer("Ты не в игре.")
             return
 
         approve = raw_vote == "yes"
         ok, info = room.set_trial_vote(callback.from_user.id, approve)
-        await callback.answer(info, show_alert=not ok)
         if not ok:
+            if info == "Пока все голосуют - ты лечишься. 💃🏼 Любовница постаралась...":
+                await callback.answer(MISTRESS_DAY_BLOCK_TOAST)
+                return
+            await callback.answer(info, show_alert=True)
             return
+        await callback.answer(info)
         persist_room(room)
 
         # Update shared group vote message after vote.
@@ -2672,7 +2770,7 @@ async def on_action_callback(callback: CallbackQuery) -> None:
 
     actor = room.get_player(callback.from_user.id)
     if actor is None:
-        await callback.answer("Ты не участвуешь в этой фазе.", show_alert=True)
+        await callback.answer("Ты не в игре.")
         return
     if not actor.alive:
         is_kamikaze_revenge = (
@@ -2681,7 +2779,7 @@ async def on_action_callback(callback: CallbackQuery) -> None:
             and room.kamikaze_pending_user_id == actor.user_id
         )
         if not is_kamikaze_revenge:
-            await callback.answer("Ты не участвуешь в этой фазе.", show_alert=True)
+            await callback.answer("Ты не в игре.")
             return
 
     async def announce_night_role_once(role_name: str) -> None:
@@ -2864,8 +2962,8 @@ async def on_action_callback(callback: CallbackQuery) -> None:
             return
 
         ok, info = room.set_day_vote(callback.from_user.id, target_id)
-        await callback.answer(info, show_alert=not ok)
         if ok:
+            await callback.answer(info)
             target = room.get_player(target_id)
             voter = room.get_player(callback.from_user.id)
             if target is not None:
@@ -2886,6 +2984,11 @@ async def on_action_callback(callback: CallbackQuery) -> None:
                 )
             await maybe_finish_phase_early(callback.bot, room)
             persist_room(room)
+        else:
+            if info == "Пока все голосуют - ты лечишься. 💃🏼 Любовница постаралась...":
+                await callback.answer(MISTRESS_DAY_BLOCK_TOAST)
+                return
+            await callback.answer(info, show_alert=True)
         return
 
     if action == "skipvote":
@@ -2902,10 +3005,10 @@ async def on_action_callback(callback: CallbackQuery) -> None:
 
         voter = room.get_player(callback.from_user.id)
         if voter is None or not voter.alive:
-            await callback.answer("Ты не можешь голосовать на этом этапе.", show_alert=True)
+            await callback.answer("Ты не в игре.")
             return
         if room.day_silenced_user_id is not None and voter.user_id == room.day_silenced_user_id:
-            await callback.answer("Ты не можешь голосовать под действием Любовницы.", show_alert=True)
+            await callback.answer(MISTRESS_DAY_BLOCK_TOAST)
             return
 
         room.day_votes[callback.from_user.id] = 0
@@ -3021,12 +3124,12 @@ async def on_noop_callback(callback: CallbackQuery) -> None:
         await callback.answer("Выбор уже зафиксирован.", show_alert=True)
         return
     if callback.data.startswith("noop:skip:"):
-        await callback.answer("Ты опоздал...", show_alert=True)
+        await callback.answer("Вы пропустили ход.", show_alert=True)
         return
     if callback.data == "noop:silenced":
-        await callback.answer("Ты не можешь голосовать под действием Любовницы.", show_alert=True)
+        await callback.answer(MISTRESS_DAY_BLOCK_TOAST)
         return
-    await callback.answer("Этап уже закрыт. Вы пропустили ход.", show_alert=True)
+    await callback.answer("Вы пропустили ход.", show_alert=True)
 
 
 @router.callback_query(F.data.startswith("pmenu:"))
@@ -3060,12 +3163,13 @@ async def on_private_menu_callback(callback: CallbackQuery) -> None:
 
     if action == "main":
         nickname = user_nickname(callback.from_user)
+        add_to_chat_link = await bot_add_to_chat_link(callback.bot)
         await show_menu_screen(
             (
                 f"<b>С возвращением, {nickname}!</b>\n\n"
                 "Выбери нужный раздел кнопками ниже."
             ),
-            private_main_menu_keyboard(),
+            private_main_menu_keyboard(add_to_chat_link),
         )
         await safe_answer()
         return
@@ -3100,7 +3204,11 @@ async def on_private_menu_callback(callback: CallbackQuery) -> None:
         await safe_answer()
         return
     if action == "profile":
-        await show_menu_screen("Профиль отключен. Используй меню ролей и статистики.", private_back_to_menu_keyboard())
+        stats = repo.get_player_stats(callback.from_user.id)
+        await show_menu_screen(
+            format_private_profile_text(user_nickname(callback.from_user), stats),
+            private_back_to_menu_keyboard(),
+        )
         await safe_answer()
         return
     await safe_answer("Неизвестный пункт меню.", show_alert=True)
@@ -3281,30 +3389,3 @@ async def enforce_group_game_rules(message: Message) -> None:
         return
 
 
-@router.message(Command("stop"))
-async def cmd_close(message: Message) -> None:
-    await cleanup_group_command_message(message)
-    room = storage.get_room(message.chat.id)
-    if room is None:
-        await message.answer("Лобби не найдено.")
-        return
-
-    if room.started:
-        closing_text = "Игра остановлена."
-    elif room.registration_open:
-        closing_text = "Регистрация отменена."
-    else:
-        closing_text = "Лобби закрыто."
-
-    if room.registration_open:
-        room.close_registration()
-        persist_room(room)
-
-    await clear_registration_post(message.bot, room)
-    cancel_phase_timer(message.chat.id)
-    cancel_registration_timer(message.chat.id)
-    clear_chat_penalties(message.chat.id)
-    clear_action_menu_messages(message.chat.id)
-    remove_room_state(message.chat.id)
-    storage.close_room(message.chat.id)
-    await message.answer(closing_text)

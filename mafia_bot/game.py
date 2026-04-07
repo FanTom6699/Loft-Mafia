@@ -685,7 +685,7 @@ class GameRoom:
         if not voter.alive:
             return False, "Ты выбыл из игры."
         if self.day_silenced_user_id is not None and voter.user_id == self.day_silenced_user_id:
-            return False, "Ты не можешь голосовать под действием Любовницы."
+            return False, "Пока все голосуют - ты лечишься. 💃🏼 Любовница постаралась..."
         if self.trial_candidate_id is not None and voter.user_id == self.trial_candidate_id:
             return False, "Кандидат на повешение не может голосовать за/против."
 
@@ -1000,13 +1000,34 @@ class GameRoom:
         mistress_target_id: int | None = None
         if mistress is not None and self.mistress_target_id is not None:
             mistress_target_id = self.mistress_target_id
+        mistress_effective_target_id = mistress_target_id
+
+        if mistress is not None and mistress_target_id is not None:
+            blocked_target = self.get_player(mistress_target_id)
+            if blocked_target is not None and blocked_target.alive:
+                mistress_killer_bypass = False
+
+                temporary_mafia_target_id = self._choose_mafia_target(self._active_mafia_votes())
+                if blocked_target.role in MAFIA_ROLES and temporary_mafia_target_id == mistress.user_id:
+                    mistress_killer_bypass = True
+                elif blocked_target.role == ROLE_MANIAC and self.maniac_target_id == mistress.user_id:
+                    mistress_killer_bypass = True
+                elif (
+                    blocked_target.role == ROLE_COMMISSAR
+                    and self.commissar_action_mode == "shoot"
+                    and self.commissar_shot_target_id == mistress.user_id
+                ):
+                    mistress_killer_bypass = True
+
+                if mistress_killer_bypass:
+                    mistress_effective_target_id = None
 
         doctor = next((p for p in self.alive_players() if p.role == ROLE_DOCTOR), None)
         doctor_target_id: int | None = None
         doctor_blocked_by_mistress = (
             doctor is not None
-            and mistress_target_id is not None
-            and doctor.user_id == mistress_target_id
+            and mistress_effective_target_id is not None
+            and doctor.user_id == mistress_effective_target_id
         )
         if doctor is not None and self.doctor_target_id is not None and not doctor_blocked_by_mistress:
             target = self.get_player(self.doctor_target_id)
@@ -1015,16 +1036,12 @@ class GameRoom:
                 if target.user_id == doctor.user_id:
                     self.doctor_self_heal_used = True
 
-        if mistress_target_id is not None:
-            blocked_target = self.get_player(mistress_target_id)
+        if mistress_effective_target_id is not None:
+            blocked_target = self.get_player(mistress_effective_target_id)
             if blocked_target is not None and blocked_target.alive:
                 self.add_night_report_line(
                     blocked_target.user_id,
                     "\"Ты со мною забудь обо всём...\", - пела 💃🏼 Любовница",
-                )
-                self.add_night_report_line(
-                    blocked_target.user_id,
-                    "Пока все голосуют - ты лечишься. 💃🏼 Любовница постаралась...",
                 )
 
         if doctor_target_id is not None:
@@ -1033,12 +1050,20 @@ class GameRoom:
                 # Add this line later so it stays the final line for the healed player.
                 pass
 
-        mafia_votes = self._active_mafia_votes()
+        mafia_blocked_by_mistress = (
+            mistress_effective_target_id if mistress_effective_target_id in self.alive_mafia_ids() else None
+        )
+        mafia_votes = self._active_mafia_votes(mafia_blocked_by_mistress)
         mafia_target_id = self._choose_mafia_target(mafia_votes)
 
         maniac = next((p for p in self.alive_players() if p.role == ROLE_MANIAC), None)
         maniac_target_id: int | None = None
-        if maniac is not None and self.maniac_target_id is not None:
+        maniac_blocked_by_mistress = (
+            maniac is not None
+            and mistress_effective_target_id is not None
+            and maniac.user_id == mistress_effective_target_id
+        )
+        if maniac is not None and self.maniac_target_id is not None and not maniac_blocked_by_mistress:
             target = self.get_player(self.maniac_target_id)
             if target is not None and target.alive and target.user_id != maniac.user_id:
                 maniac_target_id = target.user_id
@@ -1055,7 +1080,12 @@ class GameRoom:
 
         commissar_check_target_id: int | None = None
         commissar_shot_target_id: int | None = None
-        if commissar is not None:
+        commissar_blocked_by_mistress = (
+            commissar is not None
+            and mistress_effective_target_id is not None
+            and commissar.user_id == mistress_effective_target_id
+        )
+        if commissar is not None and not commissar_blocked_by_mistress:
             if self.round_no >= 2:
                 if self.commissar_action_mode == "check":
                     commissar_check_target_id = self.commissar_target_id
@@ -1181,9 +1211,8 @@ class GameRoom:
             if commissar_transfer_result is not None:
                 commissar_transfer_note, commissar_successor_id = commissar_transfer_result
 
-        # Mistress no longer blocks night actions. She only sets day silence if she survived the night.
-        if mistress is not None and mistress.alive and mistress_target_id is not None:
-            silenced_player = self.get_player(mistress_target_id)
+        if mistress_effective_target_id is not None:
+            silenced_player = self.get_player(mistress_effective_target_id)
             if silenced_player is not None and silenced_player.alive:
                 self.day_silenced_user_id = silenced_player.user_id
 
@@ -1443,7 +1472,7 @@ class GameRoom:
         if not voter.alive:
             return False, "Ты выбыл из игры."
         if self.day_silenced_user_id is not None and voter.user_id == self.day_silenced_user_id:
-            return False, "Ты не можешь голосовать под действием Любовницы."
+            return False, "Пока все голосуют - ты лечишься. 💃🏼 Любовница постаралась..."
         if not target.alive:
             return False, "Цель уже выбыла."
         if voter.user_id == target.user_id:

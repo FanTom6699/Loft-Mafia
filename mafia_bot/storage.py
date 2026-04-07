@@ -16,6 +16,14 @@ class GameStateRepository:
         self.db_path = db_path or os.getenv("MAFIA_STATE_DB", _default_db_path())
         self._init_db()
 
+    @staticmethod
+    def _ensure_column(conn: sqlite3.Connection, table: str, column: str, definition: str) -> None:
+        rows = conn.execute(f"PRAGMA table_info({table})").fetchall()
+        existing = {str(row[1]) for row in rows}
+        if column in existing:
+            return
+        conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
+
     def _init_db(self) -> None:
         with sqlite3.connect(self.db_path) as conn:
             conn.execute(
@@ -40,11 +48,15 @@ class GameStateRepository:
                     mafia_games INTEGER NOT NULL DEFAULT 0,
                     maniac_games INTEGER NOT NULL DEFAULT 0,
                     civilian_games INTEGER NOT NULL DEFAULT 0,
+                    money INTEGER NOT NULL DEFAULT 0,
+                    tickets INTEGER NOT NULL DEFAULT 0,
                     last_role TEXT NOT NULL DEFAULT '',
                     updated_at TEXT NOT NULL
                 )
                 """
             )
+            self._ensure_column(conn, "player_stats", "money", "INTEGER NOT NULL DEFAULT 0")
+            self._ensure_column(conn, "player_stats", "tickets", "INTEGER NOT NULL DEFAULT 0")
             conn.execute(
                 """
                 CREATE TABLE IF NOT EXISTS private_users (
@@ -228,6 +240,7 @@ class GameStateRepository:
             return
 
         now = datetime.now().isoformat()
+        win_money = 10
         with sqlite3.connect(self.db_path) as conn:
             for player in room.players.values():
                 won = self._did_player_win(player.role, room.winner_team)
@@ -236,6 +249,7 @@ class GameStateRepository:
                 mafia_game = 1 if player.role in MAFIA_ROLES else 0
                 maniac_game = 1 if player.role == ROLE_MANIAC else 0
                 civilian_game = 1 if player.role not in MAFIA_ROLES and player.role != ROLE_MANIAC else 0
+                money_award = win_money if won else 0
 
                 conn.execute(
                     """
@@ -250,10 +264,12 @@ class GameStateRepository:
                         mafia_games,
                         maniac_games,
                         civilian_games,
+                        money,
+                        tickets,
                         last_role,
                         updated_at
                     )
-                    VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT(user_id) DO UPDATE SET
                         display_name = excluded.display_name,
                         games_played = games_played + excluded.games_played,
@@ -264,6 +280,8 @@ class GameStateRepository:
                         mafia_games = mafia_games + excluded.mafia_games,
                         maniac_games = maniac_games + excluded.maniac_games,
                         civilian_games = civilian_games + excluded.civilian_games,
+                        money = money + excluded.money,
+                        tickets = tickets + excluded.tickets,
                         last_role = excluded.last_role,
                         updated_at = excluded.updated_at
                     """,
@@ -278,6 +296,8 @@ class GameStateRepository:
                         mafia_game,
                         maniac_game,
                         civilian_game,
+                        money_award,
+                        0,
                         player.role,
                         now,
                     ),
@@ -300,6 +320,8 @@ class GameStateRepository:
                     mafia_games,
                     maniac_games,
                     civilian_games,
+                    money,
+                    tickets,
                     last_role,
                     updated_at
                 FROM player_stats
