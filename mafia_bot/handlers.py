@@ -2747,6 +2747,47 @@ async def cmd_extend(message: Message) -> None:
     await refresh_registration_post(message, room)
 
 
+@router.message(Command("stop"))
+async def cmd_stop(message: Message) -> None:
+    await cleanup_group_command_message(message)
+    if message.chat.type == "private":
+        await message.answer("Останавливать игру нужно в групповом чате.")
+        return
+
+    room = storage.get_room(message.chat.id)
+    if room is None:
+        await message.answer("Лобби не найдено.")
+        return
+
+    if room.registration_open and not room.started:
+        room.close_registration()
+        persist_room(room)
+        await clear_registration_post(message.bot, room)
+        await clear_registration_panel_message(message.bot, message.chat.id)
+        await clear_registration_notice_message(message.bot, message.chat.id)
+        await clear_registration_warning_message(message.bot, message.chat.id)
+        cancel_phase_timer(message.chat.id)
+        cancel_registration_timer(message.chat.id)
+        clear_chat_penalties(message.chat.id)
+        clear_action_menu_messages(message.chat.id)
+        remove_room_state(message.chat.id)
+        storage.close_room(message.chat.id)
+        await message.answer("Регистрация отменена, лобби удалено.")
+        return
+
+    cancel_phase_timer(message.chat.id)
+    cancel_registration_timer(message.chat.id)
+    clear_chat_penalties(message.chat.id)
+    clear_action_menu_messages(message.chat.id)
+    await clear_registration_post(message.bot, room)
+    await clear_registration_panel_message(message.bot, message.chat.id)
+    await clear_registration_notice_message(message.bot, message.chat.id)
+    await clear_registration_warning_message(message.bot, message.chat.id)
+    remove_room_state(message.chat.id)
+    storage.close_room(message.chat.id)
+    await message.answer("Игра остановлена.")
+
+
 @router.message(Command("start"))
 async def cmd_begin(message: Message) -> None:
     await cleanup_group_command_message(message)
