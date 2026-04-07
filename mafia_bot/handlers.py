@@ -74,6 +74,8 @@ chat_penalties: dict[int, dict[int, dict[str, float | int | bool]]] = {}
 action_menu_messages: dict[int, dict[int, int]] = {}
 delete_permission_alerted_chats: set[int] = set()
 registration_panel_message_ids: dict[int, int] = {}
+registration_notice_message_ids: dict[int, int] = {}
+registration_warning_message_ids: dict[int, int] = {}
 OWNER_USER_ID = 5658493362
 MISTRESS_DAY_BLOCK_TOAST = "Ты под действием Любовницы."
 
@@ -157,6 +159,62 @@ def get_action_menu_message_id(chat_id: int, user_id: int) -> int | None:
 
 def clear_action_menu_messages(chat_id: int) -> None:
     action_menu_messages.pop(chat_id, None)
+
+
+async def clear_registration_panel_message(bot: Bot, chat_id: int) -> None:
+    message_id = registration_panel_message_ids.pop(chat_id, None)
+    if message_id is None:
+        return
+    try:
+        await bot.delete_message(chat_id=chat_id, message_id=message_id)
+    except Exception:
+        pass
+
+
+async def clear_registration_notice_message(bot: Bot, chat_id: int) -> None:
+    message_id = registration_notice_message_ids.pop(chat_id, None)
+    if message_id is None:
+        return
+    try:
+        await bot.delete_message(chat_id=chat_id, message_id=message_id)
+    except Exception:
+        pass
+
+
+async def upsert_registration_warning_message(
+    bot: Bot,
+    chat_id: int,
+    text: str,
+    reply_markup: InlineKeyboardMarkup | None = None,
+) -> None:
+    message_id = registration_warning_message_ids.get(chat_id)
+    if message_id is not None:
+        try:
+            await bot.edit_message_text(
+                chat_id=chat_id,
+                message_id=message_id,
+                text=text,
+                reply_markup=reply_markup,
+            )
+            return
+        except Exception:
+            registration_warning_message_ids.pop(chat_id, None)
+
+    try:
+        sent = await bot.send_message(chat_id, text, reply_markup=reply_markup)
+    except Exception:
+        return
+    registration_warning_message_ids[chat_id] = sent.message_id
+
+
+async def clear_registration_warning_message(bot: Bot, chat_id: int) -> None:
+    message_id = registration_warning_message_ids.pop(chat_id, None)
+    if message_id is None:
+        return
+    try:
+        await bot.delete_message(chat_id=chat_id, message_id=message_id)
+    except Exception:
+        pass
 
 
 def resolve_phase_image_path(image_path: str | None) -> str | None:
@@ -374,7 +432,8 @@ async def start_registration_timer(room, bot: Bot, seconds: int) -> None:
                 if current_room is not None and not current_room.started and current_room.registration_open:
                     me = await bot.get_me()
                     join_link = f"https://t.me/{me.username}?start=join_{room.chat_id}"
-                    await bot.send_message(
+                    await upsert_registration_warning_message(
+                        bot,
                         room.chat_id,
                         f"До окончания регистрации осталось {warning_mark} сек.",
                         reply_markup=registration_lobby_keyboard(join_link),
@@ -414,6 +473,18 @@ async def launch_game_from_registration(bot: Bot, room, chat_id: int, chat_title
         await clear_registration_post(bot, room)
     except Exception as e:
         print(f"[ERROR] clear_registration_post: {e!r}")
+    try:
+        await clear_registration_panel_message(bot, chat_id)
+    except Exception as e:
+        print(f"[ERROR] clear_registration_panel_message: {e!r}")
+    try:
+        await clear_registration_notice_message(bot, chat_id)
+    except Exception as e:
+        print(f"[ERROR] clear_registration_notice_message: {e!r}")
+    try:
+        await clear_registration_warning_message(bot, chat_id)
+    except Exception as e:
+        print(f"[ERROR] clear_registration_warning_message: {e!r}")
     try:
         clear_action_menu_messages(chat_id)
     except Exception as e:
@@ -523,6 +594,18 @@ async def process_registration_timeout(bot: Bot, chat_id: int) -> None:
             await clear_registration_post(bot, room)
         except Exception as e:
             print(f"[ERROR] clear_registration_post (min players): {e!r}")
+        try:
+            await clear_registration_panel_message(bot, chat_id)
+        except Exception as e:
+            print(f"[ERROR] clear_registration_panel_message (min players): {e!r}")
+        try:
+            await clear_registration_notice_message(bot, chat_id)
+        except Exception as e:
+            print(f"[ERROR] clear_registration_notice_message (min players): {e!r}")
+        try:
+            await clear_registration_warning_message(bot, chat_id)
+        except Exception as e:
+            print(f"[ERROR] clear_registration_warning_message (min players): {e!r}")
         try:
             cancel_registration_timer(chat_id)
         except Exception as e:
@@ -2285,10 +2368,11 @@ async def cmd_create(message: Message) -> None:
         else:
             await refresh_registration_post(message, room)
             await pin_registration_post(message.bot, room)
-        await message.answer(
+        info_message = await message.answer(
             "Лобби уже создано. Используй существующее сообщение регистрации "
             "и кнопку регистрации под ним."
         )
+        registration_notice_message_ids[message.chat.id] = info_message.message_id
         return
 
     if room is None:
@@ -2383,6 +2467,9 @@ async def cmd_leave(message: Message) -> None:
         await refresh_registration_post(message, room)
     else:
         await clear_registration_post(message.bot, room)
+        await clear_registration_panel_message(message.bot, message.chat.id)
+        await clear_registration_notice_message(message.bot, message.chat.id)
+        await clear_registration_warning_message(message.bot, message.chat.id)
         cancel_phase_timer(message.chat.id)
         cancel_registration_timer(message.chat.id)
         clear_chat_penalties(message.chat.id)
@@ -2418,18 +2505,14 @@ async def cmd_extend(message: Message) -> None:
     new_seconds = remaining + REGISTRATION_EXTENSION_SECONDS
     await start_registration_timer(room, message.bot, new_seconds)
     persist_room(room)
-    sent = await message.answer(
+    join_link = await registration_join_link(message, message.chat.id)
+    await upsert_registration_warning_message(
+        message.bot,
+        message.chat.id,
         f"Регистрация продлена на {REGISTRATION_EXTENSION_SECONDS} сек. "
-        f"Осталось {new_seconds} сек. Продлений: {room.registration_extensions}."
+        f"Осталось {new_seconds} сек. Продлений: {room.registration_extensions}.",
+        reply_markup=registration_lobby_keyboard(join_link),
     )
-    try:
-        await message.delete()
-    except Exception:
-        pass
-    try:
-        await sent.delete()
-    except Exception:
-        pass
     await refresh_registration_post(message, room)
 
 
@@ -2507,7 +2590,8 @@ async def on_registration_action(callback: CallbackQuery) -> None:
         room.registration_message_id = sent.message_id
         persist_room(room)
         await pin_registration_post(callback.bot, room)
-        await callback.message.answer("Лобби создано. Игроки могут входить через кнопку ниже")
+        info_message = await callback.message.answer("Лобби создано. Игроки могут входить через кнопку ниже")
+        registration_notice_message_ids[chat_id] = info_message.message_id
         await callback.answer("Готово")
         return
 
@@ -2557,6 +2641,8 @@ async def on_registration_action(callback: CallbackQuery) -> None:
             await callback.answer("Ты вышел из лобби")
         else:
             await clear_registration_post(callback.bot, room)
+            await clear_registration_panel_message(callback.bot, chat_id)
+            await clear_registration_notice_message(callback.bot, chat_id)
             cancel_phase_timer(chat_id)
             cancel_registration_timer(chat_id)
             clear_chat_penalties(chat_id)
