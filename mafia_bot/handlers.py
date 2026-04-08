@@ -2463,10 +2463,6 @@ async def process_night_end(bot: Bot, chat_id: int, timer_reason: str | None = N
             except Exception as e:
                 print(f"[ERROR] process_night_end: failed to send timer_reason for chat_id={chat_id}, error={e!r}")
 
-        if mafia_alive_tonight and mafia_target_tonight is not None and not room.mafia_target_announced:
-            await safe_send_message(bot, chat_id, "🤵🏻 Мафия определилась с общей целью.")
-            room.mafia_target_announced = True
-
         reports = room.pop_night_reports()
         kill_sources = room.pop_night_kill_sources()
         afk_killed_ids = set(room.afk_killed_user_ids)
