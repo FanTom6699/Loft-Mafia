@@ -1136,25 +1136,34 @@ BUFF_CATALOG = {
     "documents": {
         "title": "📁 Документы",
         "price": "💵150",
+        "price_value": 150,
+        "currency": "money",
+        "inventory_key": "buff_documents",
+        "success_name": "Документы",
         "description": "Фальшивые документы могут пригодиться когда твою роль кто-то захочет проверить",
         "details": "Каркас механики: предмет будет расходником. В будущем его можно привязать к скрытию роли при одной проверке.",
     },
     "shield": {
         "title": "🛡 Защита",
         "price": "💵100",
+        "price_value": 100,
+        "currency": "money",
+        "inventory_key": "buff_shield",
+        "success_name": "Защита",
         "description": "Один раз может спасти тебе жизнь",
         "details": "Если защита уже была в инвентаре до старта партии, она сработает один раз за игру при первой попытке ночного убийства.",
     },
     "active_role": {
         "title": "🕺 Активная роль",
         "price": "💎1",
+        "price_value": 1,
+        "currency": "tickets",
+        "inventory_key": "buff_active_role",
+        "success_name": "Активная роль",
         "description": "Даёт 99% шанс выпадения активной роли",
         "details": "Каркас механики: предмет будет влиять на выдачу роли перед стартом новой партии.",
     },
 }
-
-
-SHIELD_PRICE = 100
 
 
 def format_buffs_shop_text() -> str:
@@ -1171,11 +1180,7 @@ def format_buffs_shop_text() -> str:
 
 def format_buff_details_text(key: str, stats: dict | None) -> str:
     item = BUFF_CATALOG[key]
-    inventory_key = {
-        "documents": "buff_documents",
-        "shield": "buff_shield",
-        "active_role": "buff_active_role",
-    }[key]
+    inventory_key = str(item["inventory_key"])
     owned = int((stats or {}).get(inventory_key, 0))
     status_line = ""
     if key == "shield":
@@ -1623,10 +1628,8 @@ def private_buffs_shop_keyboard() -> InlineKeyboardMarkup:
 
 def private_buff_details_keyboard(key: str) -> InlineKeyboardMarkup:
     rows: list[list[InlineKeyboardButton]] = []
-    if key == "shield":
-        rows.append([InlineKeyboardButton(text=f"🛡 Купить за 💵{SHIELD_PRICE}", callback_data="pmenu:buy:shield")])
-    else:
-        rows.append([InlineKeyboardButton(text="🚧 Скоро будет доступно", callback_data="noop:locked")])
+    item = BUFF_CATALOG[key]
+    rows.append([InlineKeyboardButton(text=f"Купить за {item['price']}", callback_data=f"pmenu:buy:{key}")])
     rows.append([InlineKeyboardButton(text="⬅️ Назад", callback_data="pmenu:buffs")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
@@ -4191,13 +4194,29 @@ async def on_private_menu_callback(callback: CallbackQuery) -> None:
         await show_menu_screen(format_buff_details_text(key, stats), private_buff_details_keyboard(key))
         await safe_answer()
         return
-    if action == "buy:shield":
-        ok, info, stats = repo.purchase_shield_buff(callback.from_user.id, user_nickname(callback.from_user), SHIELD_PRICE)
-        if ok:
-            await show_menu_screen(format_buff_details_text("shield", stats), private_buff_details_keyboard("shield"))
-            await safe_answer("Защита куплена. Она применится со следующей игры")
+    if action.startswith("buy:"):
+        key = action.split(":", maxsplit=1)[1]
+        item = BUFF_CATALOG.get(key)
+        if item is None:
+            await safe_answer("Неизвестный баф.", show_alert=True)
             return
-        await show_menu_screen(format_buff_details_text("shield", stats), private_buff_details_keyboard("shield"))
+        currency_column = str(item["currency"])
+        currency_label = "денег" if currency_column == "money" else "билетиков"
+        ok, info, stats = repo.purchase_buff(
+            callback.from_user.id,
+            user_nickname(callback.from_user),
+            inventory_column=str(item["inventory_key"]),
+            currency_column=currency_column,
+            price=int(item["price_value"]),
+            currency_label=currency_label,
+        )
+        if ok:
+            await show_menu_screen(
+                format_private_profile_text(user_nickname(callback.from_user), stats),
+                private_profile_keyboard(),
+            )
+            await safe_answer(f"Приобретено: {item['success_name']}")
+            return
         await safe_answer(info, show_alert=True)
         return
     await safe_answer("Неизвестный пункт меню.", show_alert=True)

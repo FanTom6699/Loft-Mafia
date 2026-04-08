@@ -364,56 +364,84 @@ class GameStateRepository:
             return None
         return dict(row)
 
-    def purchase_shield_buff(self, user_id: int, display_name: str, price: int = 100) -> tuple[bool, str, dict | None]:
+    def _ensure_player_stats_row(self, conn: sqlite3.Connection, user_id: int, display_name: str) -> None:
+        now = datetime.now().isoformat()
+        conn.execute(
+            """
+            INSERT INTO player_stats(
+                user_id,
+                display_name,
+                games_played,
+                wins,
+                losses,
+                survived_games,
+                suicide_personal_wins,
+                mafia_games,
+                maniac_games,
+                civilian_games,
+                money,
+                tickets,
+                buff_documents,
+                buff_shield,
+                buff_active_role,
+                last_role,
+                updated_at
+            )
+            VALUES(?, ?, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, '', ?)
+            ON CONFLICT(user_id) DO NOTHING
+            """,
+            (user_id, display_name, now),
+        )
+
+    def purchase_buff(
+        self,
+        user_id: int,
+        display_name: str,
+        *,
+        inventory_column: str,
+        currency_column: str,
+        price: int,
+        currency_label: str,
+    ) -> tuple[bool, str, dict | None]:
+        allowed_inventory_columns = {"buff_documents", "buff_shield", "buff_active_role"}
+        allowed_currency_columns = {"money", "tickets"}
+        if inventory_column not in allowed_inventory_columns or currency_column not in allowed_currency_columns:
+            return False, "Некорректная покупка.", self.get_player_stats(user_id)
+
         now = datetime.now().isoformat()
         with sqlite3.connect(self.db_path) as conn:
-            conn.execute(
-                """
-                INSERT INTO player_stats(
-                    user_id,
-                    display_name,
-                    games_played,
-                    wins,
-                    losses,
-                    survived_games,
-                    suicide_personal_wins,
-                    mafia_games,
-                    maniac_games,
-                    civilian_games,
-                    money,
-                    tickets,
-                    buff_documents,
-                    buff_shield,
-                    buff_active_role,
-                    last_role,
-                    updated_at
-                )
-                VALUES(?, ?, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, '', ?)
-                ON CONFLICT(user_id) DO NOTHING
-                """,
-                (user_id, display_name, now),
-            )
+            self._ensure_player_stats_row(conn, user_id, display_name)
             row = conn.execute(
-                "SELECT money, buff_shield FROM player_stats WHERE user_id = ?",
+                f"SELECT {currency_column} FROM player_stats WHERE user_id = ?",
                 (user_id,),
             ).fetchone()
-            money = int(row[0]) if row is not None else 0
-            if money < price:
-                return False, f"Не хватает денег. Нужно {price}, у тебя {money}.", self.get_player_stats(user_id)
+            balance = int(row[0]) if row is not None else 0
+            if balance < price:
+                return False, f"Не хватает {currency_label}.", self.get_player_stats(user_id)
 
             conn.execute(
-                """
+                f"""
                 UPDATE player_stats
                 SET display_name = ?,
-                    money = money - ?,
-                    buff_shield = buff_shield + 1,
+                    {currency_column} = {currency_column} - ?,
+                    {inventory_column} = {inventory_column} + 1,
                     updated_at = ?
                 WHERE user_id = ?
                 """,
                 (display_name, price, now, user_id),
             )
             conn.commit()
-        return True, "Защита куплена.", self.get_player_stats(user_id)
+        return True, "Покупка выполнена.", self.get_player_stats(user_id)
+
+    def purchase_shield_buff(self, user_id: int, display_name: str, price: int = 100) -> tuple[bool, str, dict | None]:
+        return self.purchase_buff(
+            user_id,
+            display_name,
+            inventory_column="buff_shield",
+            currency_column="money",
+            price=price,
+            currency_label="денег",
+        )
 
     def consume_shield_buff(self, user_id: int) -> bool:
         now = datetime.now().isoformat()
