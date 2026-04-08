@@ -1094,19 +1094,28 @@ def format_endgame_currency_text(player, stats: dict, won: bool) -> str:
     name = escape((player.full_name or "").strip() or f"Игрок {player.user_id}")
     money = int(stats.get("money", 0))
     tickets = int(stats.get("tickets", 0))
+    buff_documents = int(stats.get("buff_documents", 0))
+    buff_shield = int(stats.get("buff_shield", 0))
+    buff_active_role = int(stats.get("buff_active_role", 0))
     if won:
         return (
             "<b>Игра завершена</b>\n"
             f'За победу в роли "{escape(player.role)}" тебе начислили 💵 10!\n\n'
             f"👤 {name}\n\n"
             f"💵 Деньги: {money}\n"
-            f"🎟Билетики: {tickets}"
+            f"🎟 Билетики: {tickets}\n\n"
+            f"🛡 Защита: {buff_shield}\n"
+            f"📁 Документы: {buff_documents}\n"
+            f"🕺 Активная роль: {buff_active_role}"
         )
     return (
         "<b>Игра завершена</b>\n\n"
         f"👤 {name}\n\n"
         f"💵 Деньги: {money}\n"
-        f"🎟Билетики: {tickets}"
+        f"🎟 Билетики: {tickets}\n\n"
+        f"🛡 Защита: {buff_shield}\n"
+        f"📁 Документы: {buff_documents}\n"
+        f"🕺 Активная роль: {buff_active_role}"
     )
 
 
@@ -1251,6 +1260,7 @@ async def send_endgame_currency_summaries(bot: Bot, room) -> None:
             await bot.send_message(
                 player.user_id,
                 format_endgame_currency_text(player, stats, won),
+                reply_markup=private_profile_keyboard(),
                 **private_game_send_kwargs(room),
             )
         except Exception:
