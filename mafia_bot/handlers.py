@@ -846,6 +846,7 @@ async def launch_game_from_registration(bot: Bot, room, chat_id: int, chat_title
     room.close_registration()
     try:
         room.assign_roles()
+        prime_room_shields(room)
         print(
             f"[DEBUG] launch_game_from_registration: chat_id={chat_id}, "
             f"started={room.started}, phase={room.phase}, round_no={room.round_no}, players={len(room.players)}"
@@ -1142,7 +1143,7 @@ BUFF_CATALOG = {
         "title": "🛡 Защита",
         "price": "💵100",
         "description": "Один раз может спасти тебе жизнь",
-        "details": "Каркас механики: предмет будет одноразовой личной защитой от смерти ночью.",
+        "details": "Если защита уже была в инвентаре до старта партии, она сработает один раз за игру при первой попытке ночного убийства.",
     },
     "active_role": {
         "title": "🕺 Активная роль",
@@ -1151,6 +1152,9 @@ BUFF_CATALOG = {
         "details": "Каркас механики: предмет будет влиять на выдачу роли перед стартом новой партии.",
     },
 }
+
+
+SHIELD_PRICE = 100
 
 
 def format_buffs_shop_text() -> str:
@@ -1173,14 +1177,36 @@ def format_buff_details_text(key: str, stats: dict | None) -> str:
         "active_role": "buff_active_role",
     }[key]
     owned = int((stats or {}).get(inventory_key, 0))
+    status_line = ""
+    if key == "shield":
+        room = get_player_profile_room(int((stats or {}).get("user_id", 0))) if stats is not None else None
+        if room is not None and room.get_player(int((stats or {}).get("user_id", 0))) is not None:
+            user_id = int((stats or {}).get("user_id", 0))
+            if user_id in room.spent_shield_user_ids:
+                status_line = "🧯 На эту игру защита уже была потрачена.\n\n"
+            elif user_id in room.shielded_user_ids:
+                status_line = "✨ Защита активна в текущей игре.\n\n"
+            elif owned > 0:
+                status_line = "⏳ Купленная во время этой игры защита сработает только в следующей партии.\n\n"
     return (
         f"<b>{item['title']}</b>\n\n"
         f"{item['description']}\n\n"
         f"💰 Цена: <b>{item['price']}</b>\n"
         f"🎒 В инвентаре: <b>{owned}</b>\n\n"
+        f"{status_line}"
         f"{item['details']}\n\n"
-        "<i>Покупка и применение пока не включены. Это каркас под будущую механику.</i>"
+        "<i>Документы и Активная роль пока остаются каркасом. Защита уже работает.</i>"
     )
+
+def prime_room_shields(room) -> None:
+    room.shielded_user_ids.clear()
+    room.spent_shield_user_ids.clear()
+    for player in room.players.values():
+        stats = repo.get_player_stats(player.user_id)
+        if stats is None:
+            continue
+        if int(stats.get("buff_shield", 0)) > 0:
+            room.arm_shield(player.user_id)
 
 
 async def send_endgame_currency_summaries(bot: Bot, room) -> None:
@@ -1595,13 +1621,14 @@ def private_buffs_shop_keyboard() -> InlineKeyboardMarkup:
     )
 
 
-def private_buff_details_keyboard() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(
-        inline_keyboard=[
-            [InlineKeyboardButton(text="🚧 Скоро будет доступно", callback_data="noop:locked")],
-            [InlineKeyboardButton(text="⬅️ Назад", callback_data="pmenu:buffs")],
-        ]
-    )
+def private_buff_details_keyboard(key: str) -> InlineKeyboardMarkup:
+    rows: list[list[InlineKeyboardButton]] = []
+    if key == "shield":
+        rows.append([InlineKeyboardButton(text=f"🛡 Купить за 💵{SHIELD_PRICE}", callback_data="pmenu:buy:shield")])
+    else:
+        rows.append([InlineKeyboardButton(text="🚧 Скоро будет доступно", callback_data="noop:locked")])
+    rows.append([InlineKeyboardButton(text="⬅️ Назад", callback_data="pmenu:buffs")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 PRIVATE_ROLE_ORDER = [
@@ -2409,6 +2436,15 @@ async def process_night_end(bot: Bot, chat_id: int, timer_reason: str | None = N
                     await safe_send_message(bot, user_id, message_text, **private_game_send_kwargs(room))
             except Exception:
                 continue
+
+        spent_shield_user_ids = room.pop_spent_shield_user_ids()
+        shield_triggered = False
+        for user_id in spent_shield_user_ids:
+            if repo.consume_shield_buff(user_id):
+                shield_triggered = True
+
+        if shield_triggered:
+            await bot.send_message(chat_id, "🌟 Кто-то из игроков потратил защиту")
 
         if lucky_triggered:
             await bot.send_message(chat_id, "☝️ Кому-то из игроков повезло")
@@ -4152,8 +4188,17 @@ async def on_private_menu_callback(callback: CallbackQuery) -> None:
             await safe_answer("Неизвестный баф.", show_alert=True)
             return
         stats = repo.get_player_stats(callback.from_user.id)
-        await show_menu_screen(format_buff_details_text(key, stats), private_buff_details_keyboard())
+        await show_menu_screen(format_buff_details_text(key, stats), private_buff_details_keyboard(key))
         await safe_answer()
+        return
+    if action == "buy:shield":
+        ok, info, stats = repo.purchase_shield_buff(callback.from_user.id, user_nickname(callback.from_user), SHIELD_PRICE)
+        if ok:
+            await show_menu_screen(format_buff_details_text("shield", stats), private_buff_details_keyboard("shield"))
+            await safe_answer("Защита куплена. Она применится со следующей игры")
+            return
+        await show_menu_screen(format_buff_details_text("shield", stats), private_buff_details_keyboard("shield"))
+        await safe_answer(info, show_alert=True)
         return
     await safe_answer("Неизвестный пункт меню.", show_alert=True)
 

@@ -146,6 +146,8 @@ class GameStateRepository:
             "bum_last_target_id": room.bum_last_target_id,
             "kamikaze_pending_user_id": room.kamikaze_pending_user_id,
             "kamikaze_target_id": room.kamikaze_target_id,
+            "shielded_user_ids": sorted(room.shielded_user_ids),
+            "spent_shield_user_ids": sorted(room.spent_shield_user_ids),
             "night_missed_streaks": room.night_missed_streaks,
             "afk_killed_user_ids": sorted(room.afk_killed_user_ids),
             "night_reports": room.night_reports,
@@ -224,6 +226,8 @@ class GameStateRepository:
         room.bum_last_target_id = payload.get("bum_last_target_id")
         room.kamikaze_pending_user_id = payload.get("kamikaze_pending_user_id")
         room.kamikaze_target_id = payload.get("kamikaze_target_id")
+        room.shielded_user_ids = {int(v) for v in payload.get("shielded_user_ids", [])}
+        room.spent_shield_user_ids = {int(v) for v in payload.get("spent_shield_user_ids", [])}
         room.night_missed_streaks = {
             int(k): int(v)
             for k, v in payload.get("night_missed_streaks", {}).items()
@@ -359,6 +363,72 @@ class GameStateRepository:
         if row is None:
             return None
         return dict(row)
+
+    def purchase_shield_buff(self, user_id: int, display_name: str, price: int = 100) -> tuple[bool, str, dict | None]:
+        now = datetime.now().isoformat()
+        with sqlite3.connect(self.db_path) as conn:
+            conn.execute(
+                """
+                INSERT INTO player_stats(
+                    user_id,
+                    display_name,
+                    games_played,
+                    wins,
+                    losses,
+                    survived_games,
+                    suicide_personal_wins,
+                    mafia_games,
+                    maniac_games,
+                    civilian_games,
+                    money,
+                    tickets,
+                    buff_documents,
+                    buff_shield,
+                    buff_active_role,
+                    last_role,
+                    updated_at
+                )
+                VALUES(?, ?, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, '', ?)
+                ON CONFLICT(user_id) DO NOTHING
+                """,
+                (user_id, display_name, now),
+            )
+            row = conn.execute(
+                "SELECT money, buff_shield FROM player_stats WHERE user_id = ?",
+                (user_id,),
+            ).fetchone()
+            money = int(row[0]) if row is not None else 0
+            if money < price:
+                return False, f"Не хватает денег. Нужно {price}, у тебя {money}.", self.get_player_stats(user_id)
+
+            conn.execute(
+                """
+                UPDATE player_stats
+                SET display_name = ?,
+                    money = money - ?,
+                    buff_shield = buff_shield + 1,
+                    updated_at = ?
+                WHERE user_id = ?
+                """,
+                (display_name, price, now, user_id),
+            )
+            conn.commit()
+        return True, "Защита куплена.", self.get_player_stats(user_id)
+
+    def consume_shield_buff(self, user_id: int) -> bool:
+        now = datetime.now().isoformat()
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.execute(
+                """
+                UPDATE player_stats
+                SET buff_shield = buff_shield - 1,
+                    updated_at = ?
+                WHERE user_id = ? AND buff_shield > 0
+                """,
+                (now, user_id),
+            )
+            conn.commit()
+            return cursor.rowcount > 0
 
     def touch_private_user(self, user_id: int, display_name: str) -> bool:
         now = datetime.now().isoformat()

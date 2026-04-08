@@ -293,6 +293,8 @@ class GameRoom:
     bum_last_target_id: int | None = None
     kamikaze_pending_user_id: int | None = None
     kamikaze_target_id: int | None = None
+    shielded_user_ids: set[int] = field(default_factory=set)
+    spent_shield_user_ids: set[int] = field(default_factory=set)
     night_missed_streaks: dict[int, int] = field(default_factory=dict)
     afk_killed_user_ids: set[int] = field(default_factory=set)
     night_reports: dict[int, list[str]] = field(default_factory=dict)
@@ -356,6 +358,8 @@ class GameRoom:
         self.bum_last_target_id = None
         self.kamikaze_pending_user_id = None
         self.kamikaze_target_id = None
+        self.shielded_user_ids.clear()
+        self.spent_shield_user_ids.clear()
         self.night_missed_streaks.clear()
         self.afk_killed_user_ids.clear()
         self.night_reports.clear()
@@ -417,6 +421,8 @@ class GameRoom:
         self.bum_last_target_id = None
         self.kamikaze_pending_user_id = None
         self.kamikaze_target_id = None
+        self.shielded_user_ids.clear()
+        self.spent_shield_user_ids.clear()
         self.night_missed_streaks.clear()
         self.afk_killed_user_ids.clear()
         self.night_reports.clear()
@@ -751,6 +757,22 @@ class GameRoom:
         if alive_mafia_ids and alive_mafia_ids.issubset(committed_mafia_ids):
             self.mafia_vote_locked = True
         return True, "Ход пропущен."
+
+    def arm_shield(self, user_id: int) -> bool:
+        player = self.get_player(user_id)
+        if player is None or not player.alive:
+            return False
+        if not self.started or self.phase == PHASE_FINISHED:
+            return False
+        if user_id in self.spent_shield_user_ids:
+            return False
+        self.shielded_user_ids.add(user_id)
+        return True
+
+    def pop_spent_shield_user_ids(self) -> set[int]:
+        payload = set(self.spent_shield_user_ids)
+        self.spent_shield_user_ids.clear()
+        return payload
 
     def all_alive_day_voted(self) -> bool:
         if self.phase != PHASE_DAY or self.day_stage != DAY_STAGE_NOMINATION:
@@ -1349,6 +1371,11 @@ class GameRoom:
                 continue
             sources = attacks.get(target_id, [])
             source_count = len(sources)
+            if target.user_id in self.shielded_user_ids:
+                self.shielded_user_ids.discard(target.user_id)
+                self.spent_shield_user_ids.add(target.user_id)
+                self.add_night_report_line(target.user_id, "Тебя пытались убить, но защита спасла")
+                continue
             if (
                 target.role == ROLE_LUCKY
                 and not self.lucky_save_used
