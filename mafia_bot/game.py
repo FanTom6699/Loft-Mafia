@@ -162,6 +162,43 @@ ROLE_PLAN_BY_COUNT: dict[int, list[str]] = {
     20: [ROLE_DON, ROLE_MAFIA, ROLE_MAFIA, ROLE_MAFIA, ROLE_MAFIA, ROLE_MAFIA, ROLE_DOCTOR, ROLE_COMMISSAR, ROLE_LUCKY, ROLE_BUM, ROLE_KAMIKAZE, ROLE_MISTRESS, ROLE_SERGEANT, ROLE_MANIAC, ROLE_ADVOCATE, ROLE_CITIZEN, ROLE_CITIZEN, ROLE_CITIZEN, ROLE_CITIZEN, ROLE_CITIZEN],
 }
 
+MAFIA_RATIO_TARGETS = {
+    "high": 3,
+    "low": 4,
+}
+
+
+def adjust_mafia_ratio(roles: list[str], mafia_ratio: str) -> list[str]:
+    divisor = MAFIA_RATIO_TARGETS.get(mafia_ratio, 3)
+    if not roles:
+        return roles
+
+    target_mafia_count = max(1, len(roles) // divisor)
+    current_mafia_count = sum(1 for role in roles if role in MAFIA_ROLES)
+
+    adjusted_roles = roles.copy()
+    while current_mafia_count > target_mafia_count:
+        for index in range(len(adjusted_roles) - 1, -1, -1):
+            if adjusted_roles[index] != ROLE_MAFIA:
+                continue
+            adjusted_roles[index] = ROLE_CITIZEN
+            current_mafia_count -= 1
+            break
+        else:
+            break
+
+    while current_mafia_count < target_mafia_count:
+        for index in range(len(adjusted_roles) - 1, -1, -1):
+            if adjusted_roles[index] != ROLE_CITIZEN:
+                continue
+            adjusted_roles[index] = ROLE_MAFIA
+            current_mafia_count += 1
+            break
+        else:
+            break
+
+    return adjusted_roles
+
 def apply_role_toggles(roles: list[str], role_toggles: dict[str, bool] | None = None) -> list[str]:
     adjusted_roles: list[str] = []
     for role in roles:
@@ -170,6 +207,35 @@ def apply_role_toggles(roles: list[str], role_toggles: dict[str, bool] | None = 
             continue
         adjusted_roles.append(role)
     return adjusted_roles
+
+
+def allow_team_kill_from_settings(settings: dict | None) -> bool:
+    misc = (settings or {}).get("misc", {})
+    return bool(misc.get("allow_team_kill", False))
+
+
+def commissar_can_shoot_from_settings(settings: dict | None) -> bool:
+    misc = (settings or {}).get("misc", {})
+    return bool(misc.get("commissar_can_shoot", True))
+
+
+def commissar_can_shoot_this_round(settings: dict | None, round_no: int) -> bool:
+    if not commissar_can_shoot_from_settings(settings):
+        return False
+    if round_no >= 2:
+        return True
+    misc = (settings or {}).get("misc", {})
+    return bool(misc.get("commissar_first_night_shot", False))
+
+
+def kamikaze_night_revenge_from_settings(settings: dict | None) -> bool:
+    misc = (settings or {}).get("misc", {})
+    return bool(misc.get("kamikaze_night_revenge", True))
+
+
+def action_notifications_from_settings(settings: dict | None) -> bool:
+    misc = (settings or {}).get("misc", {})
+    return bool(misc.get("action_notifications", True))
 
 
 @dataclass
@@ -201,6 +267,7 @@ class GameRoom:
     registration_extensions: int = 0
     registration_message_id: int | None = None
     night_votes: dict[int, int] = field(default_factory=dict)
+    night_skipped_user_ids: set[int] = field(default_factory=set)
     mafia_vote_locked: bool = False
     mafia_target_announced: bool = False
     announced_night_roles: set[str] = field(default_factory=set)
@@ -265,6 +332,7 @@ class GameRoom:
         self.round_no = 0
         self.day_stage = None
         self.night_votes.clear()
+        self.night_skipped_user_ids.clear()
         self.mafia_vote_locked = False
         self.mafia_target_announced = False
         self.announced_night_roles.clear()
@@ -324,6 +392,7 @@ class GameRoom:
         self.round_no = 1
         self.day_stage = None
         self.night_votes.clear()
+        self.night_skipped_user_ids.clear()
         self.mafia_vote_locked = False
         self.mafia_target_announced = False
         self.announced_night_roles.clear()
@@ -362,18 +431,22 @@ class GameRoom:
     @staticmethod
     def build_roles(count: int, settings: dict | None = None) -> list[str]:
         role_toggles = dict((settings or {}).get("roles", {}))
+        mafia_ratio = str((settings or {}).get("mafia_ratio", "high"))
         if count in ROLE_PLAN_BY_COUNT:
-            return apply_role_toggles(ROLE_PLAN_BY_COUNT[count].copy(), role_toggles)
+            roles = adjust_mafia_ratio(ROLE_PLAN_BY_COUNT[count].copy(), mafia_ratio)
+            return apply_role_toggles(roles, role_toggles)
 
         if count < MIN_PLAYERS:
             return apply_role_toggles([ROLE_DON, ROLE_COMMISSAR, ROLE_DOCTOR, ROLE_CITIZEN][:count], role_toggles)
 
-        # For groups above 20, keep scaling with a close mafia/civil ratio.
+        # For groups above 20, keep scaling with the configured mafia/civil ratio.
         roles = ROLE_PLAN_BY_COUNT[20].copy()
+        roles = adjust_mafia_ratio(roles, mafia_ratio)
+        divisor = MAFIA_RATIO_TARGETS.get(mafia_ratio, 3)
         while len(roles) < count:
             mafia_count = sum(1 for role in roles if role in MAFIA_ROLES)
             target_ratio = mafia_count / len(roles)
-            if target_ratio < 0.31:
+            if target_ratio < (1 / divisor):
                 roles.append(ROLE_MAFIA)
             else:
                 roles.append(ROLE_CITIZEN)
@@ -547,6 +620,8 @@ class GameRoom:
             return False, "Цель уже выбыла."
         if target_player.user_id == mafia_player.user_id:
             return False, "Нельзя выбрать себя."
+        if not allow_team_kill_from_settings(self.settings) and target_player.role in MAFIA_ROLES:
+            return False, "Убийство союзников отключено в настройках."
 
         self.night_votes[mafia_user_id] = target_user_id
         if self.all_mafia_voted():
@@ -577,45 +652,105 @@ class GameRoom:
         if self.phase != PHASE_NIGHT:
             return False
 
-        if self.alive_mafia() and not self.all_mafia_voted():
+        alive_mafia_ids = {player.user_id for player in self.alive_mafia()}
+        committed_mafia_ids = set(self.night_votes.keys()) | set(self.night_skipped_user_ids)
+        if alive_mafia_ids and not alive_mafia_ids.issubset(committed_mafia_ids):
             return False
 
         doctor_alive = any(p.alive and p.role == ROLE_DOCTOR for p in self.players.values())
-        if doctor_alive and self.doctor_target_id is None:
+        doctor_player = next((p for p in self.players.values() if p.alive and p.role == ROLE_DOCTOR), None)
+        if doctor_alive and self.doctor_target_id is None and (doctor_player is None or doctor_player.user_id not in self.night_skipped_user_ids):
             return False
 
         commissar_alive = any(p.alive and p.role == ROLE_COMMISSAR for p in self.players.values())
+        commissar_player = next((p for p in self.players.values() if p.alive and p.role == ROLE_COMMISSAR), None)
         if commissar_alive:
-            if self.round_no >= 2:
+            if commissar_player is not None and commissar_player.user_id in self.night_skipped_user_ids:
+                pass
+            elif commissar_can_shoot_this_round(self.settings, self.round_no):
                 if self.commissar_action_mode is None:
                     return False
-                if self.commissar_action_mode == "check" and self.commissar_target_id is None:
+                elif self.commissar_action_mode == "check" and self.commissar_target_id is None:
                     return False
-                if self.commissar_action_mode == "shoot" and self.commissar_shot_target_id is None:
+                elif self.commissar_action_mode == "shoot" and self.commissar_shot_target_id is None:
                     return False
             elif self.commissar_target_id is None:
                 return False
 
         advocate_alive = any(p.alive and p.role == ROLE_ADVOCATE for p in self.players.values())
-        if advocate_alive and self.advocate_target_id is None:
+        advocate_player = next((p for p in self.players.values() if p.alive and p.role == ROLE_ADVOCATE), None)
+        if advocate_alive and self.advocate_target_id is None and (advocate_player is None or advocate_player.user_id not in self.night_skipped_user_ids):
             return False
 
         maniac_alive = any(p.alive and p.role == ROLE_MANIAC for p in self.players.values())
-        if maniac_alive and self.maniac_target_id is None:
+        maniac_player = next((p for p in self.players.values() if p.alive and p.role == ROLE_MANIAC), None)
+        if maniac_alive and self.maniac_target_id is None and (maniac_player is None or maniac_player.user_id not in self.night_skipped_user_ids):
             return False
 
         mistress_alive = any(p.alive and p.role == ROLE_MISTRESS for p in self.players.values())
-        if mistress_alive and self.mistress_target_id is None:
+        mistress_player = next((p for p in self.players.values() if p.alive and p.role == ROLE_MISTRESS), None)
+        if mistress_alive and self.mistress_target_id is None and (mistress_player is None or mistress_player.user_id not in self.night_skipped_user_ids):
             return False
 
         bum_alive = any(p.alive and p.role == ROLE_BUM for p in self.players.values())
-        if bum_alive and self.bum_target_id is None:
+        bum_player = next((p for p in self.players.values() if p.alive and p.role == ROLE_BUM), None)
+        if bum_alive and self.bum_target_id is None and (bum_player is None or bum_player.user_id not in self.night_skipped_user_ids):
             return False
 
-        if self.kamikaze_pending_user_id is not None and self.kamikaze_target_id is None:
+        if self.kamikaze_pending_user_id is not None and self.kamikaze_target_id is None and self.kamikaze_pending_user_id not in self.night_skipped_user_ids:
             return False
 
         return True
+
+    def can_skip_night_action(self, user_id: int) -> bool:
+        if self.phase != PHASE_NIGHT:
+            return False
+        if user_id in self.night_skipped_user_ids:
+            return False
+
+        player = self.get_player(user_id)
+        is_kamikaze_revenge = self.kamikaze_pending_user_id == user_id
+        if player is None:
+            return False
+        if not player.alive and not is_kamikaze_revenge:
+            return False
+
+        if player.role in MAFIA_ROLES:
+            return not self.mafia_vote_locked and user_id not in self.night_votes
+        if player.role == ROLE_DOCTOR:
+            return self.doctor_target_id is None
+        if player.role == ROLE_COMMISSAR:
+            if commissar_can_shoot_this_round(self.settings, self.round_no):
+                if self.commissar_action_mode is None:
+                    return True
+                if self.commissar_action_mode == "check":
+                    return self.commissar_target_id is None
+                if self.commissar_action_mode == "shoot":
+                    return self.commissar_shot_target_id is None
+                return False
+            return self.commissar_target_id is None
+        if player.role == ROLE_ADVOCATE:
+            return self.advocate_target_id is None
+        if player.role == ROLE_MANIAC:
+            return self.maniac_target_id is None
+        if player.role == ROLE_MISTRESS:
+            return self.mistress_target_id is None
+        if player.role == ROLE_BUM:
+            return self.bum_target_id is None
+        if is_kamikaze_revenge:
+            return self.kamikaze_target_id is None
+        return False
+
+    def set_night_skip(self, user_id: int) -> tuple[bool, str]:
+        if not self.can_skip_night_action(user_id):
+            return False, "Сейчас нельзя пропустить ход."
+
+        self.night_skipped_user_ids.add(user_id)
+        alive_mafia_ids = {player.user_id for player in self.alive_mafia()}
+        committed_mafia_ids = set(self.night_votes.keys()) | set(self.night_skipped_user_ids)
+        if alive_mafia_ids and alive_mafia_ids.issubset(committed_mafia_ids):
+            self.mafia_vote_locked = True
+        return True, "Ход пропущен."
 
     def all_alive_day_voted(self) -> bool:
         if self.phase != PHASE_DAY or self.day_stage != DAY_STAGE_NOMINATION:
@@ -728,6 +863,7 @@ class GameRoom:
         self.trial_candidate_id = None
         self.trial_votes.clear()
         self.night_votes.clear()
+        self.night_skipped_user_ids.clear()
         self.mafia_vote_locked = False
         self.mafia_target_announced = False
         self.announced_night_roles.clear()
@@ -931,7 +1067,7 @@ class GameRoom:
         if commissar.role != ROLE_COMMISSAR:
             return False, "Проверять может только комиссар."
 
-        if self.round_no >= 2:
+        if commissar_can_shoot_this_round(self.settings, self.round_no):
             if self.commissar_action_mode is None:
                 return False, "Сначала выбери: проверить или стрелять."
             if self.commissar_action_mode != "check":
@@ -950,8 +1086,8 @@ class GameRoom:
     def set_commissar_action_mode(self, commissar_user_id: int, mode: str) -> tuple[bool, str]:
         if self.phase != PHASE_NIGHT:
             return False, "Сейчас не ночь."
-        if self.round_no < 2:
-            return False, "Стрелять можно только со второй ночи."
+        if not commissar_can_shoot_this_round(self.settings, self.round_no):
+            return False, "Стрелять в эту ночь нельзя по настройкам."
 
         commissar = self.get_player(commissar_user_id)
         if commissar is None:
@@ -973,8 +1109,8 @@ class GameRoom:
     def set_commissar_shot_target(self, commissar_user_id: int, target_user_id: int) -> tuple[bool, str]:
         if self.phase != PHASE_NIGHT:
             return False, "Сейчас не ночь."
-        if self.round_no < 2:
-            return False, "Стрелять можно только со второй ночи."
+        if not commissar_can_shoot_this_round(self.settings, self.round_no):
+            return False, "Стрелять в эту ночь нельзя по настройкам."
         if self.commissar_action_mode != "shoot":
             return False, "Сначала выбери режим стрельбы."
 
@@ -990,6 +1126,8 @@ class GameRoom:
             return False, "Цель уже выбыла."
         if target.user_id == commissar.user_id:
             return False, "Нельзя выбрать себя."
+        if not allow_team_kill_from_settings(self.settings) and target.role in {ROLE_COMMISSAR, ROLE_SERGEANT}:
+            return False, "Убийство союзников отключено в настройках."
 
         self.commissar_shot_target_id = target_user_id
         return True, "Комиссар выбрал цель для выстрела."
@@ -1061,7 +1199,9 @@ class GameRoom:
                 if target.user_id == doctor.user_id:
                     self.doctor_self_heal_used = True
 
-        if mistress_effective_target_id is not None:
+        notify_actions = action_notifications_from_settings(self.settings)
+
+        if notify_actions and mistress_effective_target_id is not None:
             blocked_target = self.get_player(mistress_effective_target_id)
             if blocked_target is not None and blocked_target.alive:
                 self.add_night_report_line(
@@ -1111,7 +1251,7 @@ class GameRoom:
             and commissar.user_id == mistress_effective_target_id
         )
         if commissar is not None and not commissar_blocked_by_mistress:
-            if self.round_no >= 2:
+            if commissar_can_shoot_this_round(self.settings, self.round_no):
                 if self.commissar_action_mode == "check":
                     commissar_check_target_id = self.commissar_target_id
                 elif self.commissar_action_mode == "shoot":
@@ -1122,11 +1262,13 @@ class GameRoom:
         if commissar is not None and commissar_check_target_id is not None:
             checked = self.get_player(commissar_check_target_id)
             if checked is not None and checked.alive:
-                self.add_night_report_line(checked.user_id, "Кто-то сильно заинтересовался твоей ролью...")
+                if notify_actions:
+                    self.add_night_report_line(checked.user_id, "Кто-то сильно заинтересовался твоей ролью...")
                 mafia_checked = checked.role in MAFIA_ROLES
                 masked_by_advocate = mafia_checked and advocate_target_id == checked.user_id
                 if masked_by_advocate:
-                    self.add_night_report_line(checked.user_id, "Но 👨🏼‍💼 Адвокат сказал, что ты 👨🏼 Мирный житель!")
+                    if notify_actions:
+                        self.add_night_report_line(checked.user_id, "Но 👨🏼‍💼 Адвокат сказал, что ты 👨🏼 Мирный житель!")
                     self.remember_commissar_check(checked.user_id, ROLE_CITIZEN)
                     self.add_night_report_line(
                         commissar.user_id,
@@ -1150,6 +1292,9 @@ class GameRoom:
             attacks.setdefault(self.kamikaze_target_id, []).append("камикадзе")
 
         def night_kamikaze_revenge_targets(victim_user_id: int, sources: list[str]) -> list[int]:
+            if not kamikaze_night_revenge_from_settings(self.settings):
+                return []
+
             targets: list[int] = []
 
             for source in sources:
@@ -1312,7 +1457,7 @@ class GameRoom:
                         healed_target.user_id,
                         "Бинты, скальпель и ножницы не пригодились... И хорошо!",
                     )
-                elif not target_was_attacked:
+                elif not target_was_attacked and notify_actions:
                     self.add_night_report_line(
                         healed_target.user_id,
                         "👨🏼‍⚕️ Доктор приходил к тебе в гости",
@@ -1320,11 +1465,11 @@ class GameRoom:
                 else:
                     if doctor is not None and healed_target.user_id == doctor.user_id:
                         self.add_night_report_line(healed_target.user_id, "Ты успешно вылечил себя!")
-                    else:
+                    elif notify_actions:
                         self.add_night_report_line(healed_target.user_id, "👨🏼‍⚕️ Доктор вылечил тебя")
 
         active_night_ids: set[int] = set()
-        acted_night_ids: set[int] = set()
+        acted_night_ids: set[int] = set(self.night_skipped_user_ids)
         for player in self.alive_players():
             if player.role in MAFIA_ROLES:
                 active_night_ids.add(player.user_id)
@@ -1336,7 +1481,7 @@ class GameRoom:
                     acted_night_ids.add(player.user_id)
             elif player.role == ROLE_COMMISSAR:
                 active_night_ids.add(player.user_id)
-                if self.round_no >= 2:
+                if commissar_can_shoot_this_round(self.settings, self.round_no):
                     if self.commissar_action_mode == "check" and self.commissar_target_id is not None:
                         acted_night_ids.add(player.user_id)
                     elif self.commissar_action_mode == "shoot" and self.commissar_shot_target_id is not None:

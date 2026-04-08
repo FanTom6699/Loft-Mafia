@@ -50,6 +50,9 @@ class GameStateRepository:
                     civilian_games INTEGER NOT NULL DEFAULT 0,
                     money INTEGER NOT NULL DEFAULT 0,
                     tickets INTEGER NOT NULL DEFAULT 0,
+                    buff_documents INTEGER NOT NULL DEFAULT 0,
+                    buff_shield INTEGER NOT NULL DEFAULT 0,
+                    buff_active_role INTEGER NOT NULL DEFAULT 0,
                     last_role TEXT NOT NULL DEFAULT '',
                     updated_at TEXT NOT NULL
                 )
@@ -57,6 +60,9 @@ class GameStateRepository:
             )
             self._ensure_column(conn, "player_stats", "money", "INTEGER NOT NULL DEFAULT 0")
             self._ensure_column(conn, "player_stats", "tickets", "INTEGER NOT NULL DEFAULT 0")
+            self._ensure_column(conn, "player_stats", "buff_documents", "INTEGER NOT NULL DEFAULT 0")
+            self._ensure_column(conn, "player_stats", "buff_shield", "INTEGER NOT NULL DEFAULT 0")
+            self._ensure_column(conn, "player_stats", "buff_active_role", "INTEGER NOT NULL DEFAULT 0")
             conn.execute(
                 """
                 CREATE TABLE IF NOT EXISTS private_users (
@@ -114,6 +120,7 @@ class GameStateRepository:
             "registration_extensions": room.registration_extensions,
             "registration_message_id": room.registration_message_id,
             "night_votes": room.night_votes,
+            "night_skipped_user_ids": sorted(room.night_skipped_user_ids),
             "mafia_vote_locked": room.mafia_vote_locked,
             "mafia_target_announced": room.mafia_target_announced,
             "announced_night_roles": sorted(room.announced_night_roles),
@@ -182,6 +189,7 @@ class GameStateRepository:
         room.registration_message_id = payload.get("registration_message_id")
 
         room.night_votes = {int(k): int(v) for k, v in payload.get("night_votes", {}).items()}
+        room.night_skipped_user_ids = {int(v) for v in payload.get("night_skipped_user_ids", [])}
         room.mafia_vote_locked = bool(payload.get("mafia_vote_locked", False))
         room.mafia_target_announced = bool(payload.get("mafia_target_announced", False))
         room.announced_night_roles = set(payload.get("announced_night_roles", []))
@@ -338,6 +346,9 @@ class GameStateRepository:
                     civilian_games,
                     money,
                     tickets,
+                    buff_documents,
+                    buff_shield,
+                    buff_active_role,
                     last_role,
                     updated_at
                 FROM player_stats

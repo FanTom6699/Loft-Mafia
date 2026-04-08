@@ -8,7 +8,7 @@ from html import escape
 from aiogram import F, Router
 from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError, TelegramRetryAfter
 from aiogram.filters import Command, CommandObject, CommandStart
-from aiogram.types import CallbackQuery, ChatPermissions, FSInputFile, InlineKeyboardButton, InlineKeyboardMarkup, Message, User
+from aiogram.types import CallbackQuery, ChatMemberUpdated, ChatPermissions, FSInputFile, InlineKeyboardButton, InlineKeyboardMarkup, Message, User
 from aiogram import Bot
 
 from mafia_bot.storage import GameStateRepository
@@ -76,6 +76,7 @@ delete_permission_alerted_chats: set[int] = set()
 registration_panel_message_ids: dict[int, int] = {}
 registration_notice_message_ids: dict[int, int] = {}
 registration_warning_message_ids: dict[int, int] = {}
+recent_chat_welcomes: dict[tuple[int, int], float] = {}
 OWNER_USER_ID = 5658493362
 MISTRESS_DAY_BLOCK_TOAST = "Ты под действием Любовницы."
 MUTE_DEAD_PLAYERS = True
@@ -121,6 +122,38 @@ SETTINGS_MUTE_TITLES = {
     "sleeping": "Требуется ли запрещать писать сообщения в чат ночью?",
     "outsiders": "Требуется ли запрещать писать сообщения в чат тем, кто не в игре?",
 }
+SETTINGS_MISC_TITLES = {
+    "admin_game_only": "Разрешить запускать новую игру только администраторам?",
+    "action_notifications": "Требуется ли писать пользователям о том, что ночью к ним кто-то пришёл?",
+    "allow_team_kill": "Разрешить убийство союзников?\nЕсли выбрать \"нет\", то при выборе жертвы имена союзников будут отсутствовать",
+    "buffs_enabled": "Требуется ли включить дополнительные возможности для игроков?",
+    "commissar_can_shoot": "Разрешить роли Комиссар Каттани стрелять?\nЕсли выбрать \"нет\", то он будет заниматься только проверкой ролей",
+    "commissar_first_night_shot": "Разрешить комиссару стрелять в первую ночь?\nЕсли выбрать \"нет\", то комиссар не сможет стрелять в первую ночь",
+    "content_protection": "Требуется ли включить защиту контента?\nЕсли выбрать \"да\", бот запретит копировать и пересылать игровые личные сообщения, а также делать их скриншоты",
+    "day_vote_skip": "Разрешить игрокам пропускать ход на дневном голосовании?",
+    "kamikaze_night_revenge": "Разрешить Камикадзе отомстить своему убийце ночью?\nЕсли выбрать \"Да\", то Камикадзе при смерти будет уничтожать своего убийцу",
+    "delete_media": "Требуется ли удалять публикуемые пользователями фото, видео и аудио?",
+    "night_action_skip": "Разрешить игрокам пропускать ход при ночном действии?",
+    "show_targets": "Стоит ли показывать выбранные цели?\nЕсли выбрать \"да\", то ночью станут видны цели. Например: Доктор решил зайти к G.Hughes",
+    "show_roles": "Стоит ли показывать роли?\nЕсли выбрать \"да\", то бот будет объявлять роли погибших. В обратном случае роли останутся в тайне до завершения игры.",
+    "show_killers": "Требуется ли отображать в чате роль того, кто совершил убийство?",
+}
+SETTINGS_MAFIA_RATIO_TITLES = {
+    "high": "Больше (1/3)",
+    "low": "Меньше (1/4)",
+}
+SETTINGS_MAFIA_RATIO_TEXT = (
+    "Выберите коэффициент количества мафии.\n"
+    "При варианте \"Больше\" каждый 3-й игрок будет мафией, а при варианте \"Меньше\" - каждый 4-й."
+)
+SETTINGS_VOTING_MODE_TITLES = {
+    "open": "Открытое",
+    "secret": "Тайное",
+}
+SETTINGS_VOTING_MODE_TEXT = (
+    "Стоит ли делать голосование закрытым и скрывать имена обвиняемых?\n"
+    "При варианте \"Открытое\" будет видно кто за кого голосовал, а при варианте \"Тайное\" - не будет видно."
+)
 
 
 def get_phase_lock(chat_id: int) -> asyncio.Lock:
@@ -189,6 +222,116 @@ def role_mark_text(role: str) -> str:
     return f"{emoji} <b>{role}</b>".strip()
 
 
+def is_secret_voting_enabled(room) -> bool:
+    return room_chat_settings(room).get("voting_mode", "open") == "secret"
+
+
+def trial_vote_prompt_text(room, candidate) -> str:
+    if candidate is None:
+        return "Вы точно хотите линчевать обвиняемого?"
+    if is_secret_voting_enabled(room):
+        return "Вы точно хотите линчевать обвиняемого?"
+    return f"Вы точно хотите линчевать {player_profile_link(candidate)}?"
+
+
+def show_targets_enabled(room) -> bool:
+    return bool(room_chat_settings(room).get("misc", {}).get("show_targets", False))
+
+
+def show_roles_enabled(room) -> bool:
+    return bool(room_chat_settings(room).get("misc", {}).get("show_roles", True))
+
+
+def allow_team_kill_enabled(room) -> bool:
+    return bool(room_chat_settings(room).get("misc", {}).get("allow_team_kill", False))
+
+
+def commissar_can_shoot_enabled(room) -> bool:
+    return bool(room_chat_settings(room).get("misc", {}).get("commissar_can_shoot", True))
+
+
+def commissar_can_shoot_this_night(room) -> bool:
+    settings = room_chat_settings(room).get("misc", {})
+    if not bool(settings.get("commissar_can_shoot", True)):
+        return False
+    if getattr(room, "round_no", 0) >= 2:
+        return True
+    return bool(settings.get("commissar_first_night_shot", False))
+
+
+def night_action_skip_enabled(room) -> bool:
+    return bool(room_chat_settings(room).get("misc", {}).get("night_action_skip", False))
+
+
+def day_vote_skip_enabled(room) -> bool:
+    return bool(room_chat_settings(room).get("misc", {}).get("day_vote_skip", True))
+
+
+def content_protection_enabled(room) -> bool:
+    return bool(room_chat_settings(room).get("misc", {}).get("content_protection", False))
+
+
+def private_game_send_kwargs(room) -> dict:
+    if not content_protection_enabled(room):
+        return {}
+    return {"protect_content": True}
+
+
+def night_role_announcement_text(room, role_name: str, target=None, *, variant: str = "default") -> str:
+    if show_targets_enabled(room) and target is not None:
+        target_mark = player_profile_link(target)
+        targeted_announcements = {
+            ROLE_COMMISSAR: {
+                "default": f"<b>🕵️ Комиссар Каттани</b> решил проверить {target_mark}.",
+                "shoot": f"<b>🕵️ Комиссар Каттани</b> решил застрелить {target_mark}.",
+            },
+            ROLE_BUM: {
+                "default": f"<b>🧙🏼‍♂️ Бомж</b> пошёл за бутылкой к {target_mark}.",
+            },
+            ROLE_MANIAC: {
+                "default": f"<b>🔪 Маньяк</b> выбрал целью {target_mark}.",
+            },
+            ROLE_ADVOCATE: {
+                "default": f"<b>👨🏼‍💼 Адвокат</b> решил защищать {target_mark}.",
+            },
+            ROLE_MISTRESS: {
+                "default": f"<b>💃🏼 Любовница</b> решила зайти к {target_mark}.",
+            },
+            ROLE_DOCTOR: {
+                "default": f"<b>👨🏼‍⚕️ Доктор</b> решил зайти к {target_mark}.",
+            },
+            ROLE_KAMIKAZE: {
+                "default": f"<b>💣 Камикадзе</b> решил забрать с собой {target_mark}.",
+            },
+            ROLE_DON: {
+                "default": f"<b>🤵🏻 Мафия</b> выбрала жертву {target_mark}.",
+            },
+            ROLE_MAFIA: {
+                "default": f"<b>🤵🏻 Мафия</b> выбрала жертву {target_mark}.",
+            },
+        }
+        role_variants = targeted_announcements.get(role_name)
+        if role_variants is not None:
+            return role_variants.get(variant, role_variants.get("default", f"{role_mark_text(role_name)} выбрал цель {target_mark}."))
+
+    role_announcement = {
+        ROLE_COMMISSAR: "<b>🕵️ Комиссар Каттани</b> ушёл искать злодеев...",
+        ROLE_BUM: "<b>🧙🏼‍♂️ Бомж</b> пошёл к кому-то за бутылкой...",
+        ROLE_MANIAC: "<b>🔪 Маньяк</b> спрятался глубоко в кустах...",
+        ROLE_ADVOCATE: "<b>👨🏼‍💼 Адвокат</b> ищет мафию для защиты...",
+        ROLE_MISTRESS: "<b>💃🏼 Любовница</b> уже ждёт кого-то в гости...",
+        ROLE_DOCTOR: "<b>👨🏼‍⚕️ Доктор</b> вышел на ночное дежурство...",
+        ROLE_KAMIKAZE: "<b>💣 Камикадзе</b> решил забрать кого-то с собой...",
+        ROLE_DON: "<b>🤵🏻 Мафия</b> выбрала жертву...",
+        ROLE_MAFIA: "<b>🤵🏻 Мафия</b> выбрала жертву...",
+    }
+    announcement_text = role_announcement.get(role_name)
+    if announcement_text is None:
+        role_mark = role_mark_text(role_name)
+        return f"{role_mark} сделал ночной ход."
+    return announcement_text
+
+
 def default_chat_settings() -> dict:
     return {
         "roles": {role: True for role in SETTINGS_ROLE_OPTIONS},
@@ -204,6 +347,24 @@ def default_chat_settings() -> dict:
             "sleeping": MUTE_SLEEPING_PLAYERS,
             "outsiders": MUTE_NON_PLAYERS,
         },
+        "misc": {
+            "admin_game_only": False,
+            "action_notifications": True,
+            "allow_team_kill": False,
+            "buffs_enabled": False,
+            "commissar_can_shoot": True,
+            "commissar_first_night_shot": False,
+            "content_protection": False,
+            "day_vote_skip": True,
+            "kamikaze_night_revenge": True,
+            "delete_media": False,
+            "night_action_skip": False,
+            "show_targets": False,
+            "show_roles": True,
+            "show_killers": False,
+        },
+        "mafia_ratio": "high",
+        "voting_mode": "open",
         "leave_restriction_seconds": LEAVE_RESTRICTION_SECONDS,
     }
 
@@ -235,6 +396,46 @@ def merge_chat_settings(raw_settings: dict | None) -> dict:
     raw_leave_restriction = raw_settings.get("leave_restriction_seconds")
     if isinstance(raw_leave_restriction, int) and raw_leave_restriction >= 0:
         settings["leave_restriction_seconds"] = raw_leave_restriction
+
+    raw_mafia_ratio = raw_settings.get("mafia_ratio")
+    if raw_mafia_ratio in SETTINGS_MAFIA_RATIO_TITLES:
+        settings["mafia_ratio"] = raw_mafia_ratio
+
+    raw_voting_mode = raw_settings.get("voting_mode")
+    if raw_voting_mode in SETTINGS_VOTING_MODE_TITLES:
+        settings["voting_mode"] = raw_voting_mode
+
+    raw_misc = raw_settings.get("misc", {})
+    if isinstance(raw_misc, dict):
+        settings.setdefault("misc", {})
+        if "admin_game_only" in raw_misc:
+            settings["misc"]["admin_game_only"] = bool(raw_misc["admin_game_only"])
+        if "action_notifications" in raw_misc:
+            settings["misc"]["action_notifications"] = bool(raw_misc["action_notifications"])
+        if "allow_team_kill" in raw_misc:
+            settings["misc"]["allow_team_kill"] = bool(raw_misc["allow_team_kill"])
+        if "buffs_enabled" in raw_misc:
+            settings["misc"]["buffs_enabled"] = bool(raw_misc["buffs_enabled"])
+        if "commissar_can_shoot" in raw_misc:
+            settings["misc"]["commissar_can_shoot"] = bool(raw_misc["commissar_can_shoot"])
+        if "commissar_first_night_shot" in raw_misc:
+            settings["misc"]["commissar_first_night_shot"] = bool(raw_misc["commissar_first_night_shot"])
+        if "content_protection" in raw_misc:
+            settings["misc"]["content_protection"] = bool(raw_misc["content_protection"])
+        if "day_vote_skip" in raw_misc:
+            settings["misc"]["day_vote_skip"] = bool(raw_misc["day_vote_skip"])
+        if "kamikaze_night_revenge" in raw_misc:
+            settings["misc"]["kamikaze_night_revenge"] = bool(raw_misc["kamikaze_night_revenge"])
+        if "delete_media" in raw_misc:
+            settings["misc"]["delete_media"] = bool(raw_misc["delete_media"])
+        if "night_action_skip" in raw_misc:
+            settings["misc"]["night_action_skip"] = bool(raw_misc["night_action_skip"])
+        if "show_targets" in raw_misc:
+            settings["misc"]["show_targets"] = bool(raw_misc["show_targets"])
+        if "show_roles" in raw_misc:
+            settings["misc"]["show_roles"] = bool(raw_misc["show_roles"])
+        if "show_killers" in raw_misc:
+            settings["misc"]["show_killers"] = bool(raw_misc["show_killers"])
 
     return settings
 
@@ -489,8 +690,11 @@ def night_skipped_user_ids(room) -> list[int]:
         elif player.role == "Доктор" and room.doctor_target_id is None:
             skipped.append(player.user_id)
         elif player.role == "Комиссар Каттани":
-            if room.round_no >= 2:
-                if room.commissar_action_mode is None:
+            if commissar_can_shoot_this_night(room):
+                if not commissar_can_shoot_enabled(room):
+                    if room.commissar_target_id is None:
+                        skipped.append(player.user_id)
+                elif room.commissar_action_mode is None:
                     skipped.append(player.user_id)
                 elif room.commissar_action_mode == "check" and room.commissar_target_id is None:
                     skipped.append(player.user_id)
@@ -513,12 +717,34 @@ def night_skipped_user_ids(room) -> list[int]:
     return skipped
 
 
+def skipped_night_chat_text(player) -> str | None:
+    if player.role == ROLE_BUM:
+        return "🚷 🧙🏼‍♂️ Бомж сегодня отдыхает"
+    if player.role == ROLE_DOCTOR:
+        return "🚷 👨🏼‍⚕️ Доктор предпочитает не играть"
+    if player.role == ROLE_MANIAC:
+        return "🚷 🔪 Маньяк предпочитает не играть"
+    if player.role == ROLE_MISTRESS:
+        return "🚷 💃🏼 Любовница предпочитает не играть"
+    if player.role == ROLE_DON:
+        return "🚷 🤵🏻 Дон сегодня отдыхает"
+    if player.role == ROLE_COMMISSAR:
+        return "🚷 🕵️‍ Комиссар Каттани не хочет участвовать в наших баталиях"
+    return None
+
+
 async def mark_skipped_night_menus(bot: Bot, room, skipped_user_ids: list[int]) -> None:
     if not skipped_user_ids:
         return
 
     keyboard = skipped_turn_keyboard(room.chat_id)
+    chat_messages: list[str] = []
     for user_id in skipped_user_ids:
+        player = room.get_player(user_id)
+        if player is not None:
+            chat_text = skipped_night_chat_text(player)
+            if chat_text is not None:
+                chat_messages.append(chat_text)
         message_id = get_action_menu_message_id(room.chat_id, user_id)
         if message_id is None:
             continue
@@ -539,6 +765,9 @@ async def mark_skipped_night_menus(bot: Bot, room, skipped_user_ids: list[int]) 
                 )
             except Exception:
                 continue
+
+    for chat_text in dict.fromkeys(chat_messages):
+        await safe_send_message(bot, room.chat_id, chat_text)
 
 
 def format_killer_sources_text(sources: list[str]) -> str:
@@ -668,7 +897,10 @@ async def launch_game_from_registration(bot: Bot, room, chat_id: int, chat_title
             name = player_display_name(player)
             try:
                 card_text = role_card_for_player(room, player, chat_title or room.chat_title or "Групповой чат")
-                await asyncio.wait_for(bot.send_message(player.user_id, card_text), timeout=8)
+                await asyncio.wait_for(
+                    bot.send_message(player.user_id, card_text, **private_game_send_kwargs(room)),
+                    timeout=8,
+                )
                 return name, True
             except Exception as e:
                 print(f"[ERROR] send_one_role_card({name}): {e!r}")
@@ -880,6 +1112,9 @@ def format_private_profile_text(display_name: str, stats: dict | None) -> str:
     safe_name = escape((display_name or "").strip() or "Игрок")
     money = int((stats or {}).get("money", 0))
     tickets = int((stats or {}).get("tickets", 0))
+    buff_documents = int((stats or {}).get("buff_documents", 0))
+    buff_shield = int((stats or {}).get("buff_shield", 0))
+    buff_active_role = int((stats or {}).get("buff_active_role", 0))
     last_role = str((stats or {}).get("last_role", "") or "-")
     last_role_mark = role_mark_text(last_role) if last_role != "-" else "-"
 
@@ -888,7 +1123,63 @@ def format_private_profile_text(display_name: str, stats: dict | None) -> str:
         f"👤 <b>{safe_name}</b>\n\n"
         f"💵 Деньги: <b>{money}</b>\n"
         f"🎟 Билетики: <b>{tickets}</b>\n\n"
+        "<b>🚀 Бафы</b>\n"
+        f"📁 Документы: <b>{buff_documents}</b>\n"
+        f"🛡 Защита: <b>{buff_shield}</b>\n"
+        f"🕺 Активная роль: <b>{buff_active_role}</b>\n\n"
         f"🎭 Последняя роль: {last_role_mark}"
+    )
+
+
+BUFF_CATALOG = {
+    "documents": {
+        "title": "📁 Документы",
+        "price": "💵150",
+        "description": "Фальшивые документы могут пригодиться когда твою роль кто-то захочет проверить",
+        "details": "Каркас механики: предмет будет расходником. В будущем его можно привязать к скрытию роли при одной проверке.",
+    },
+    "shield": {
+        "title": "🛡 Защита",
+        "price": "💵100",
+        "description": "Один раз может спасти тебе жизнь",
+        "details": "Каркас механики: предмет будет одноразовой личной защитой от смерти ночью.",
+    },
+    "active_role": {
+        "title": "🕺 Активная роль",
+        "price": "💎1",
+        "description": "Даёт 99% шанс выпадения активной роли",
+        "details": "Каркас механики: предмет будет влиять на выдачу роли перед стартом новой партии.",
+    },
+}
+
+
+def format_buffs_shop_text() -> str:
+    return (
+        "<b>Что будем покупать?</b>\n\n"
+        "📁 <b>Документы</b>\n"
+        f"{BUFF_CATALOG['documents']['description']}\n\n"
+        "🛡 <b>Защита</b>\n"
+        f"{BUFF_CATALOG['shield']['description']}\n\n"
+        "🕺 <b>Активная роль</b>\n"
+        f"{BUFF_CATALOG['active_role']['description']}"
+    )
+
+
+def format_buff_details_text(key: str, stats: dict | None) -> str:
+    item = BUFF_CATALOG[key]
+    inventory_key = {
+        "documents": "buff_documents",
+        "shield": "buff_shield",
+        "active_role": "buff_active_role",
+    }[key]
+    owned = int((stats or {}).get(inventory_key, 0))
+    return (
+        f"<b>{item['title']}</b>\n\n"
+        f"{item['description']}\n\n"
+        f"💰 Цена: <b>{item['price']}</b>\n"
+        f"🎒 В инвентаре: <b>{owned}</b>\n\n"
+        f"{item['details']}\n\n"
+        "<i>Покупка и применение пока не включены. Это каркас под будущую механику.</i>"
     )
 
 
@@ -908,6 +1199,7 @@ async def send_endgame_currency_summaries(bot: Bot, room) -> None:
             await bot.send_message(
                 player.user_id,
                 format_endgame_currency_text(player, stats, won),
+                **private_game_send_kwargs(room),
             )
         except Exception:
             continue
@@ -955,6 +1247,43 @@ async def cleanup_group_command_message(message: Message) -> None:
 async def delete_message_later(message: Message, delay_seconds: int) -> None:
     await asyncio.sleep(delay_seconds)
     await safe_delete_message(message)
+
+
+def should_send_chat_welcome(chat_id: int, user_id: int, ttl_seconds: int = 30) -> bool:
+    now = time.monotonic()
+    expired_keys = [key for key, timestamp in recent_chat_welcomes.items() if now - timestamp > ttl_seconds]
+    for key in expired_keys:
+        recent_chat_welcomes.pop(key, None)
+
+    welcome_key = (chat_id, user_id)
+    previous = recent_chat_welcomes.get(welcome_key)
+    if previous is not None and now - previous <= ttl_seconds:
+        return False
+
+    recent_chat_welcomes[welcome_key] = now
+    return True
+
+
+async def send_group_welcome(bot: Bot, chat_id: int, user: User) -> None:
+    if user.is_bot:
+        return
+    if not should_send_chat_welcome(chat_id, user.id):
+        return
+
+    start_link = await bot_start_link(bot)
+    safe_name = escape(user_nickname(user))
+    sent = await bot.send_message(
+        chat_id,
+        (
+            f"Привет, {safe_name} 👋\n"
+            "Добро пожаловать в <b>Loft Mafia Bot</b> 🎭\n\n"
+            "❗️Перед началом игры просим ознакомиться с правилами — @rules_loft ❗️\n\n"
+            "🎮 Чтобы начать игру, нажми:\n"
+            f"👉 <a href=\"{start_link}\">Начать в боте</a>\n\n"
+            "🤍 Прекрасных игр вам и хорошего настроения! 🤍"
+        ),
+    )
+    asyncio.create_task(delete_message_later(sent, 60))
 
 
 def get_or_create_penalty(chat_id: int, user_id: int) -> dict[str, float | int | bool]:
@@ -1240,9 +1569,38 @@ def private_main_menu_keyboard() -> InlineKeyboardMarkup:
     )
 
 
+def private_profile_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="🛒 Магазин", callback_data="pmenu:buffs")],
+            [InlineKeyboardButton(text="⬅️ В меню", callback_data="pmenu:main")],
+        ]
+    )
+
+
 def private_back_to_menu_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[[InlineKeyboardButton(text="⬅️ В меню", callback_data="pmenu:main")]]
+    )
+
+
+def private_buffs_shop_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="📁 Документы - 💵150", callback_data="pmenu:buff:documents")],
+            [InlineKeyboardButton(text="🛡 Защита - 💵100", callback_data="pmenu:buff:shield")],
+            [InlineKeyboardButton(text="🕺 Активная роль - 💎1", callback_data="pmenu:buff:active_role")],
+            [InlineKeyboardButton(text="⬅️ Назад", callback_data="pmenu:profile")],
+        ]
+    )
+
+
+def private_buff_details_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="🚧 Скоро будет доступно", callback_data="noop:locked")],
+            [InlineKeyboardButton(text="⬅️ Назад", callback_data="pmenu:buffs")],
+        ]
     )
 
 
@@ -1296,7 +1654,7 @@ def private_settings_main_keyboard(chat_id: int) -> InlineKeyboardMarkup:
             [InlineKeyboardButton(text="🕐 Тайминги", callback_data=settings_callback_data(chat_id, "timings"))],
             [InlineKeyboardButton(text="🙊 Молчанка", callback_data=settings_callback_data(chat_id, "mute"))],
             [InlineKeyboardButton(text="🛠 Разное", callback_data=settings_callback_data(chat_id, "misc"))],
-            [InlineKeyboardButton(text="⬅️ Выход", callback_data=settings_callback_data(chat_id, "close"))],
+            [InlineKeyboardButton(text="⬅️ Назад", callback_data=settings_callback_data(chat_id, "close"))],
         ]
     )
 
@@ -1399,8 +1757,57 @@ def private_settings_mute_toggle_keyboard(chat_id: int, settings: dict, key: str
 def private_settings_misc_keyboard(chat_id: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
+            [InlineKeyboardButton(text="🕵🏻 Кол-во мафии", callback_data=settings_callback_data(chat_id, "mafia_ratio"))],
+            [InlineKeyboardButton(text="🙋‍♂️ Тайное голосование", callback_data=settings_callback_data(chat_id, "voting_mode"))],
+            [InlineKeyboardButton(text="🚨 Оповещение о действиях", callback_data=settings_callback_data(chat_id, "misc_item", "action_notifications"))],
+            [InlineKeyboardButton(text="✍️ Защита контента", callback_data=settings_callback_data(chat_id, "misc_item", "content_protection"))],
+            [InlineKeyboardButton(text="👤 Показывать цели", callback_data=settings_callback_data(chat_id, "misc_item", "show_targets"))],
+            [InlineKeyboardButton(text="🕵🏻 Показывать роли", callback_data=settings_callback_data(chat_id, "misc_item", "show_roles"))],
+            [InlineKeyboardButton(text="☠️ Убийство союзников", callback_data=settings_callback_data(chat_id, "misc_item", "allow_team_kill"))],
+            [InlineKeyboardButton(text="🔫 Комиссар Каттани стреляет", callback_data=settings_callback_data(chat_id, "misc_item", "commissar_can_shoot"))],
+            [InlineKeyboardButton(text="🔫 Выстрел в первую ночь", callback_data=settings_callback_data(chat_id, "misc_item", "commissar_first_night_shot"))],
+            [InlineKeyboardButton(text="🚫🌅 Пропуск дневного голосования", callback_data=settings_callback_data(chat_id, "misc_item", "day_vote_skip"))],
+            [InlineKeyboardButton(text="💣 Камикадзе взрывается ночью", callback_data=settings_callback_data(chat_id, "misc_item", "kamikaze_night_revenge"))],
+            [InlineKeyboardButton(text="🚫🌃 Пропуск ночного действия", callback_data=settings_callback_data(chat_id, "misc_item", "night_action_skip"))],
+            [InlineKeyboardButton(text="🖼 Удаление медиа", callback_data=settings_callback_data(chat_id, "misc_item", "delete_media"))],
+            [InlineKeyboardButton(text="👑 Админ запускает игру", callback_data=settings_callback_data(chat_id, "misc_item", "admin_game_only"))],
+            [InlineKeyboardButton(text="🚀 Включение бафов", callback_data=settings_callback_data(chat_id, "misc_item", "buffs_enabled"))],
+            [InlineKeyboardButton(text="💀 Показывать исполнителей", callback_data=settings_callback_data(chat_id, "misc_item", "show_killers"))],
             [InlineKeyboardButton(text="🚪 Ограничение выхода", callback_data=settings_callback_data(chat_id, "leave"))],
             [InlineKeyboardButton(text="⬅️ Назад", callback_data=settings_callback_data(chat_id, "main"))],
+        ]
+    )
+
+
+def private_settings_mafia_ratio_keyboard(chat_id: int, settings: dict) -> InlineKeyboardMarkup:
+    current = settings.get("mafia_ratio", "high")
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text=f"Больше (1/3) {selected_square(current == 'high')}", callback_data=settings_callback_data(chat_id, "mafia_ratio_set", "high"))],
+            [InlineKeyboardButton(text=f"Меньше (1/4) {selected_square(current == 'low')}", callback_data=settings_callback_data(chat_id, "mafia_ratio_set", "low"))],
+            [InlineKeyboardButton(text="⬅️ Назад", callback_data=settings_callback_data(chat_id, "misc"))],
+        ]
+    )
+
+
+def private_settings_voting_mode_keyboard(chat_id: int, settings: dict) -> InlineKeyboardMarkup:
+    current = settings.get("voting_mode", "open")
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text=f"Открытое {selected_square(current == 'open')}", callback_data=settings_callback_data(chat_id, "voting_mode_set", "open"))],
+            [InlineKeyboardButton(text=f"Тайное {selected_square(current == 'secret')}", callback_data=settings_callback_data(chat_id, "voting_mode_set", "secret"))],
+            [InlineKeyboardButton(text="⬅️ Назад", callback_data=settings_callback_data(chat_id, "misc"))],
+        ]
+    )
+
+
+def private_settings_misc_toggle_keyboard(chat_id: int, settings: dict, key: str) -> InlineKeyboardMarkup:
+    current = bool(settings.get("misc", {}).get(key, False))
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text=f"Да {selected_square(current)}", callback_data=settings_callback_data(chat_id, "misc_set", key, 1))],
+            [InlineKeyboardButton(text=f"Нет {selected_square(not current)}", callback_data=settings_callback_data(chat_id, "misc_set", key, 0))],
+            [InlineKeyboardButton(text="⬅️ Назад", callback_data=settings_callback_data(chat_id, "misc"))],
         ]
     )
 
@@ -1467,6 +1874,8 @@ def selected_target_for_actor(room, actor_user_id: int) -> int | None:
         return None
 
     if room.phase == "night":
+        if actor_user_id in getattr(room, "night_skipped_user_ids", set()):
+            return 0
         if actor.role in {"Дон", "Мафия"}:
             return room.night_votes.get(actor_user_id)
         if actor.role == "Доктор":
@@ -1542,7 +1951,7 @@ def build_action_keyboard(room, actor_user_id: int) -> InlineKeyboardMarkup | No
     if room.phase == "night":
         if actor.role in {"Дон", "Мафия"}:
             for target in alive_targets:
-                if target.role in {ROLE_DON, ROLE_MAFIA}:
+                if not allow_team_kill_enabled(room) and target.role in {ROLE_DON, ROLE_MAFIA}:
                     continue
                 rows.append(
                     [
@@ -1565,7 +1974,7 @@ def build_action_keyboard(room, actor_user_id: int) -> InlineKeyboardMarkup | No
                     ]
                 )
         if actor.role == "Комиссар Каттани":
-            if room.round_no >= 2 and room.commissar_action_mode is None:
+            if commissar_can_shoot_this_night(room) and room.commissar_action_mode is None:
                 rows.append(
                     [
                         InlineKeyboardButton(
@@ -1582,8 +1991,10 @@ def build_action_keyboard(room, actor_user_id: int) -> InlineKeyboardMarkup | No
                         )
                     ]
                 )
-            elif room.round_no >= 2 and room.commissar_action_mode == "shoot":
+            elif commissar_can_shoot_this_night(room) and room.commissar_action_mode == "shoot":
                 for target in alive_targets:
+                    if not allow_team_kill_enabled(room) and target.role in {ROLE_COMMISSAR, ROLE_SERGEANT}:
+                        continue
                     rows.append(
                         [
                             InlineKeyboardButton(
@@ -1670,12 +2081,24 @@ def build_action_keyboard(room, actor_user_id: int) -> InlineKeyboardMarkup | No
                     )
                 ]
             )
+        if day_vote_skip_enabled(room):
+            skip_text = "✅ Пропустить ход" if selected_target_id == 0 else "Пропустить ход"
+            rows.append(
+                [
+                    InlineKeyboardButton(
+                        text=skip_text,
+                        callback_data=f"act:skipvote:{room.chat_id}:0",
+                    )
+                ]
+            )
+
+    if room.phase == "night" and rows and night_action_skip_enabled(room):
         skip_text = "✅ Пропустить ход" if selected_target_id == 0 else "Пропустить ход"
         rows.append(
             [
                 InlineKeyboardButton(
                     text=skip_text,
-                    callback_data=f"act:skipvote:{room.chat_id}:0",
+                    callback_data=f"noop:skip:{room.chat_id}",
                 )
             ]
         )
@@ -1715,7 +2138,7 @@ def build_action_prompt_text(room, actor_user_id: int) -> str:
         if actor.role == ROLE_ADVOCATE:
             return "<b>Кого будем защищать от правосудия?</b>"
         if actor.role == ROLE_COMMISSAR:
-            if room.round_no >= 2:
+            if commissar_can_shoot_this_night(room):
                 if room.commissar_action_mode is None:
                     return "<b>Проверить или стрелять?</b>"
                 if room.commissar_action_mode == "shoot":
@@ -1790,11 +2213,11 @@ async def send_action_menu(message: Message) -> None:
 
     keyboard = build_action_keyboard(room, message.from_user.id)
     if keyboard is None:
-        await message.answer("Сейчас у твоей роли нет доступных действий.")
+        await message.answer("Сейчас у твоей роли нет доступных действий.", **private_game_send_kwargs(room))
         return
 
     prompt_text = build_action_prompt_text(room, message.from_user.id)
-    sent = await message.answer(prompt_text, reply_markup=keyboard)
+    sent = await message.answer(prompt_text, reply_markup=keyboard, **private_game_send_kwargs(room))
     track_action_menu_message(room.chat_id, message.from_user.id, sent.message_id)
 
 
@@ -1809,6 +2232,7 @@ async def push_phase_action_menus(bot: Bot, room) -> None:
                 player.user_id,
                 prompt_text,
                 reply_markup=keyboard,
+                **private_game_send_kwargs(room),
             )
             track_action_menu_message(room.chat_id, player.user_id, sent.message_id)
         except Exception:
@@ -1832,7 +2256,7 @@ async def push_kamikaze_revenge_menu(bot: Bot, room) -> None:
 
     try:
         prompt_text = build_action_prompt_text(room, user_id)
-        sent = await bot.send_message(user_id, prompt_text, reply_markup=keyboard)
+        sent = await bot.send_message(user_id, prompt_text, reply_markup=keyboard, **private_game_send_kwargs(room))
         track_action_menu_message(room.chat_id, user_id, sent.message_id)
     except Exception:
         await bot.send_message(
@@ -1845,11 +2269,10 @@ async def push_trial_vote_menus(bot: Bot, room, candidate) -> None:
     candidate_name = player_display_name(candidate)
     print(f"[TRIAL] push_trial_vote_menus: candidate={candidate_name}, chat_id={room.chat_id}")
     yes_count, no_count = room.trial_vote_counts()
-    candidate_mark = player_profile_link(candidate)
     try:
         await bot.send_message(
             room.chat_id,
-            f"Вы точно хотите линчевать {candidate_mark}?",
+            trial_vote_prompt_text(room, candidate),
             reply_markup=trial_vote_keyboard(room.chat_id, yes_count, no_count),
         )
     except Exception as e:
@@ -1861,7 +2284,7 @@ async def send_mafia_private_update(room, bot, text: str) -> None:
         if player.role not in {ROLE_DON, ROLE_MAFIA}:
             continue
         try:
-            await bot.send_message(player.user_id, text)
+            await bot.send_message(player.user_id, text, **private_game_send_kwargs(room))
         except Exception:
             continue
 
@@ -1889,7 +2312,11 @@ async def announce_commissar_transfer(room, bot: Bot, commissar_successor_id: in
 
     await bot.send_message(room.chat_id, "👮🏼‍♂️ Сержант унаследовал роль 🕵️‍ Комиссар Каттани")
     try:
-        await bot.send_message(commissar_successor_id, "Теперь ты 🕵️‍ Комиссар Каттани")
+        await bot.send_message(
+            commissar_successor_id,
+            "Теперь ты 🕵️‍ Комиссар Каттани",
+            **private_game_send_kwargs(room),
+        )
     except Exception:
         pass
 
@@ -1908,6 +2335,7 @@ async def prompt_last_words(bot: Bot, room, eliminated) -> None:
                     "<b>Тебя убили :(</b>\n"
                     "Ты можешь отправить сюда своё предсмертное сообщение"
                 ),
+                **private_game_send_kwargs(room),
             )
         except Exception:
             continue
@@ -1978,7 +2406,7 @@ async def process_night_end(bot: Bot, chat_id: int, timer_reason: str | None = N
                 for message_text in compact_night_report_messages(lines):
                     if "пытались убить, но тебе повезло" in message_text.lower():
                         lucky_triggered = True
-                    await safe_send_message(bot, user_id, message_text)
+                    await safe_send_message(bot, user_id, message_text, **private_game_send_kwargs(room))
             except Exception:
                 continue
 
@@ -1986,17 +2414,22 @@ async def process_night_end(bot: Bot, chat_id: int, timer_reason: str | None = N
             await bot.send_message(chat_id, "☝️ Кому-то из игроков повезло")
 
         if mafia_alive_tonight and mafia_target_tonight is None:
-            await bot.send_message(chat_id, "🚷 🤵🏻 <b>Дон</b> сегодня не в настроении")
+            await bot.send_message(chat_id, "🚷 🤵🏻 Дон сегодня отдыхает")
 
         await send_phase_media(bot, chat_id, room.day_media_caption(), DAY_IMAGE_PATH)
 
         if eliminated:
+            show_killers = bool(room_chat_settings(room).get("misc", {}).get("show_killers", False))
+            show_roles = show_roles_enabled(room)
             for dead in eliminated:
-                role_text = role_mark_text(dead.role)
                 sources = kill_sources.get(dead.user_id, [])
-                killer_text = format_killer_sources_text(sources)
+                killer_text = format_killer_sources_text(sources) if show_killers else ""
                 dead_mark = player_profile_link(dead)
-                text = f"Сегодня был жестоко убит {role_text} {dead_mark}"
+                if show_roles:
+                    role_text = role_mark_text(dead.role)
+                    text = f"Сегодня был жестоко убит {role_text} {dead_mark}"
+                else:
+                    text = f"Сегодня был жестоко убит {dead_mark}"
                 if killer_text:
                     text += f"\n{killer_text}"
                 await bot.send_message(chat_id, text)
@@ -2008,7 +2441,12 @@ async def process_night_end(bot: Bot, chat_id: int, timer_reason: str | None = N
                 if dead.user_id not in afk_killed_ids:
                     continue
                 try:
-                    await safe_send_message(bot, dead.user_id, "Ты бездействовал больше 2 ночей подряд и был убит...")
+                    await safe_send_message(
+                        bot,
+                        dead.user_id,
+                        "Ты бездействовал больше 2 ночей подряд и был убит...",
+                        **private_game_send_kwargs(room),
+                    )
                 except Exception:
                     pass
                 dead_mark = player_profile_link(dead)
@@ -2200,15 +2638,18 @@ async def process_day_end(bot: Bot, chat_id: int, timer_reason: str | None = Non
 
             if eliminated:
                 first = eliminated[0]
-                role_text = role_mark_text(first.role)
                 first_mark = player_profile_link(first)
+                verdict_target = "обвиняемого" if is_secret_voting_enabled(room) else first_mark
+                reveal_roles = show_roles_enabled(room)
                 await safe_send_message(
                     bot,
                     chat_id,
-                    f"<b>Результаты голосования:</b>\n<b>{yes_count}</b> 👍  |  <b>{no_count}</b> 👎\n\nВешаем {first_mark}! :)",
+                    f"<b>Результаты голосования:</b>\n<b>{yes_count}</b> 👍  |  <b>{no_count}</b> 👎\n\nВешаем {verdict_target}! :)",
                 )
-                await asyncio.sleep(2)
-                await safe_send_message(bot, chat_id, f"{first_mark} был {role_text}")
+                if reveal_roles:
+                    role_text = role_mark_text(first.role)
+                    await asyncio.sleep(2)
+                    await safe_send_message(bot, chat_id, f"{first_mark} был {role_text}")
                 await asyncio.sleep(2)
                 try:
                     if first.role == ROLE_KAMIKAZE:
@@ -2229,9 +2670,12 @@ async def process_day_end(bot: Bot, chat_id: int, timer_reason: str | None = Non
                     await safe_send_message(bot, chat_id, "💀 <b>Самоубийца</b> выполнил личную цель победы.")
                 if first.role == "Камикадзе" and len(eliminated) > 1:
                     second = eliminated[1]
-                    second_role = role_mark_text(second.role)
                     second_mark = player_profile_link(second)
-                    await safe_send_message(bot, chat_id, f"💣 Камикадзе забрал с собой {second_mark} ({second_role}).")
+                    if reveal_roles:
+                        second_role = role_mark_text(second.role)
+                        await safe_send_message(bot, chat_id, f"💣 Камикадзе забрал с собой {second_mark} ({second_role}).")
+                    else:
+                        await safe_send_message(bot, chat_id, f"💣 Камикадзе забрал с собой {second_mark}.")
             else:
                 await safe_send_message(
                     bot,
@@ -2538,21 +2982,25 @@ async def on_new_chat_members(message: Message) -> None:
     members = [member for member in (message.new_chat_members or []) if not member.is_bot]
     if not members:
         return
-
-    start_link = await bot_start_link(message.bot)
     for member in members:
-        safe_name = escape(user_nickname(member))
-        sent = await message.answer(
-            (
-                f"Привет, {safe_name} 👋\n"
-                "Добро пожаловать в <b>Loft Mafia Bot</b> 🎭\n\n"
-                "❗️Перед началом игры просим ознакомиться с правилами — @rules_loft ❗️\n\n"
-                "🎮 Чтобы начать игру, нажми:\n"
-                f"👉 <a href=\"{start_link}\">Начать в боте</a>\n\n"
-                "🤍 Прекрасных игр вам и хорошего настроения! 🤍"
-            )
-        )
-        asyncio.create_task(delete_message_later(sent, 60))
+        await send_group_welcome(message.bot, message.chat.id, member)
+
+
+@router.chat_member(F.chat.type.in_({"group", "supergroup"}))
+async def on_chat_member_joined(update: ChatMemberUpdated) -> None:
+    user = update.new_chat_member.user
+    if user.is_bot:
+        return
+
+    old_status = update.old_chat_member.status
+    new_status = update.new_chat_member.status
+    joined_statuses = {"member", "administrator", "creator", "restricted"}
+    if new_status not in joined_statuses:
+        return
+    if old_status not in {"left", "kicked"}:
+        return
+
+    await send_group_welcome(update.bot, update.chat.id, user)
 
 @router.message(Command("roles"))
 async def cmd_roles(message: Message) -> None:
@@ -2591,7 +3039,7 @@ async def cmd_profile(message: Message) -> None:
     stats = repo.get_player_stats(message.from_user.id)
     await message.answer(
         format_private_profile_text(user_nickname(message.from_user), stats),
-        reply_markup=private_back_to_menu_keyboard(),
+        reply_markup=private_profile_keyboard(),
     )
 
 
@@ -2664,6 +3112,12 @@ async def cmd_create(message: Message) -> None:
             "Не могу открыть регистрацию: дайте боту право администратора «Удалять сообщения»."
         )
         return
+
+    chat_settings = load_chat_settings(message.chat.id)
+    if bool(chat_settings.get("misc", {}).get("admin_game_only", False)):
+        if not await is_group_admin(message.bot, message.chat.id, message.from_user.id):
+            await message.answer("Запуск новой игры разрешён только администраторам.")
+            return
 
     if is_user_blocked(message.chat.id, message.from_user.id):
         await notify_registration_blocked(message.bot, message.chat.id, message.from_user.id)
@@ -2763,13 +3217,13 @@ async def cmd_leave(message: Message) -> None:
         persist_room(room)
 
         leaver_mark = player_profile_link(player)
-        await message.answer(
-            f"{leaver_mark} не выдержал гнетущей атмосферы этого города и повесился.\n"
-            f"Он был {role_mark_text(player.role)}"
-        )
+        leave_text = f"{leaver_mark} не выдержал гнетущей атмосферы этого города и повесился."
+        if show_roles_enabled(room):
+            leave_text += f"\nОн был {role_mark_text(player.role)}"
+        await message.answer(leave_text)
 
         try:
-            await message.bot.send_message(player.user_id, "Ты вышел из игры")
+            await message.bot.send_message(player.user_id, "Ты вышел из игры", **private_game_send_kwargs(room))
         except Exception:
             pass
 
@@ -2905,6 +3359,12 @@ async def on_registration_action(callback: CallbackQuery) -> None:
         if registration_panel_message_ids.get(chat_id) != panel_message_id:
             await callback.answer()
             return
+
+        chat_settings = load_chat_settings(chat_id)
+        if bool(chat_settings.get("misc", {}).get("admin_game_only", False)):
+            if not await is_group_admin(callback.bot, chat_id, callback.from_user.id):
+                await callback.answer("Запуск новой игры разрешён только администраторам.", show_alert=True)
+                return
 
         if is_user_blocked(chat_id, callback.from_user.id):
             await notify_registration_blocked(callback.bot, chat_id, callback.from_user.id)
@@ -3131,10 +3591,9 @@ async def on_trial_callback(callback: CallbackQuery) -> None:
         # Update shared group vote message after vote.
         yes_count, no_count = room.trial_vote_counts()
         candidate = room.get_player(room.trial_candidate_id) if room.trial_candidate_id is not None else None
-        candidate_mark = player_profile_link(candidate) if candidate is not None else "кандидат"
         try:
             await callback.message.edit_text(
-                f"Вы точно хотите линчевать {candidate_mark}?",
+                trial_vote_prompt_text(room, candidate),
                 reply_markup=trial_vote_keyboard(chat_id, yes_count, no_count),
             )
         except Exception:
@@ -3159,7 +3618,7 @@ async def on_trial_callback(callback: CallbackQuery) -> None:
                 f"chat_id={room.chat_id}, eligible={len(eligible_voter_ids)}, received={len(received_vote_ids)}, "
                 f"yes={yes_count}, no={no_count}"
             )
-            completion_text = f"Вы точно хотите линчевать {candidate_mark}?\n\nГолосование завершено"
+            completion_text = f"{trial_vote_prompt_text(room, candidate)}\n\nГолосование завершено"
             try:
                 await callback.message.edit_text(completion_text)
             except Exception:
@@ -3220,27 +3679,17 @@ async def on_action_callback(callback: CallbackQuery) -> None:
             await callback.answer("Ты не в игре.")
             return
 
-    async def announce_night_role_once(role_name: str) -> None:
+    if room.phase == PHASE_NIGHT and callback.from_user.id in getattr(room, "night_skipped_user_ids", set()):
+        await callback.answer("Выбор уже зафиксирован до конца ночи.", show_alert=True)
+        return
+
+    async def announce_night_role_once(role_name: str, target=None, *, variant: str = "default") -> None:
         if room.phase != "night":
             return
         if not room.mark_night_role_announced(role_name):
             return
-        role_announcement = {
-            ROLE_COMMISSAR: "<b>🕵️ Комиссар Каттани</b> ушёл искать злодеев...",
-            ROLE_BUM: "<b>🧙🏼‍♂️ Бомж</b> пошёл к кому-то за бутылкой...",
-            ROLE_MANIAC: "<b>🔪 Маньяк</b> спрятался глубоко в кустах...",
-            ROLE_ADVOCATE: "<b>👨🏼‍💼 Адвокат</b> ищет мафию для защиты...",
-            ROLE_MISTRESS: "<b>💃🏼 Любовница</b> уже ждёт кого-то в гости...",
-            ROLE_DOCTOR: "<b>👨🏼‍⚕️ Доктор</b> вышел на ночное дежурство...",
-            ROLE_KAMIKAZE: "<b>💣 Камикадзе</b> решил забрать кого-то с собой...",
-            ROLE_DON: "<b>🤵🏻 Мафия</b> выбрала жертву...",
-            ROLE_MAFIA: "<b>🤵🏻 Мафия</b> выбрала жертву...",
-        }
-        announcement_text = role_announcement.get(role_name)
-        if announcement_text is None:
-            role_mark = role_mark_text(role_name)
-            announcement_text = f"{role_mark} сделал ночной ход."
-        await callback.bot.send_message(room.chat_id, announcement_text)
+        announcement_text = night_role_announcement_text(room, role_name, target, variant=variant)
+        await safe_send_message(callback.bot, room.chat_id, announcement_text, parse_mode="HTML")
 
     if action == "kill":
         if room.night_votes.get(callback.from_user.id) is not None:
@@ -3269,6 +3718,14 @@ async def on_action_callback(callback: CallbackQuery) -> None:
                     "Голосование мафии завершено\n"
                     f"Мафия принесла в жертву {final_name}.",
                 )
+                if final_target is not None and not room.mafia_target_announced:
+                    await safe_send_message(
+                        callback.bot,
+                        room.chat_id,
+                        night_role_announcement_text(room, ROLE_DON, final_target),
+                        parse_mode="HTML",
+                    )
+                    room.mafia_target_announced = True
             if target is not None:
                 selected_name = player_display_name(target)
                 selected_user_id = target.user_id
@@ -3291,7 +3748,7 @@ async def on_action_callback(callback: CallbackQuery) -> None:
         await callback.answer(info, show_alert=not ok)
         if ok:
             target = room.get_player(target_id)
-            await announce_night_role_once(actor.role)
+            await announce_night_role_once(actor.role, target)
             if target is not None:
                 selected_name = player_display_name(target)
                 selected_user_id = target.user_id
@@ -3306,8 +3763,11 @@ async def on_action_callback(callback: CallbackQuery) -> None:
         return
 
     if action == "commode":
-        if room.round_no < 2:
-            await callback.answer("Стрелять можно только со второй ночи.", show_alert=True)
+        if not commissar_can_shoot_enabled(room):
+            await callback.answer("Стрельба Комиссара отключена в настройках.", show_alert=True)
+            return
+        if not commissar_can_shoot_this_night(room):
+            await callback.answer("Стрелять в эту ночь нельзя по настройкам.", show_alert=True)
             return
         if room.commissar_target_id is not None or room.commissar_shot_target_id is not None:
             await callback.answer("Выбор уже зафиксирован до конца ночи.", show_alert=True)
@@ -3334,7 +3794,7 @@ async def on_action_callback(callback: CallbackQuery) -> None:
         await callback.answer("Проверка принята." if ok else info, show_alert=not ok)
         if ok:
             target = room.get_player(target_id)
-            await announce_night_role_once(actor.role)
+            await announce_night_role_once(actor.role, target)
             if target is not None:
                 selected_name = player_display_name(target)
                 selected_user_id = target.user_id
@@ -3356,6 +3816,7 @@ async def on_action_callback(callback: CallbackQuery) -> None:
         await callback.answer(info, show_alert=not ok)
         if ok:
             target = room.get_player(target_id)
+            await announce_night_role_once(actor.role, target, variant="shoot")
             if target is not None:
                 selected_name = player_display_name(target)
                 selected_user_id = target.user_id
@@ -3377,7 +3838,7 @@ async def on_action_callback(callback: CallbackQuery) -> None:
         await callback.answer(info, show_alert=not ok)
         if ok:
             target = room.get_player(target_id)
-            await announce_night_role_once(actor.role)
+            await announce_night_role_once(actor.role, target)
             if target is not None:
                 selected_name = player_display_name(target)
                 selected_user_id = target.user_id
@@ -3415,7 +3876,7 @@ async def on_action_callback(callback: CallbackQuery) -> None:
                 locked_choice_text(room, callback.from_user.id, selected_name, selected_user_id),
             )
 
-            if voter is not None and target is not None:
+            if voter is not None and target is not None and not is_secret_voting_enabled(room):
                 await callback.bot.send_message(
                     room.chat_id,
                     f"{player_profile_link(voter)} проголосовал за {player_profile_link(target)}",
@@ -3436,6 +3897,9 @@ async def on_action_callback(callback: CallbackQuery) -> None:
         if room.phase != PHASE_DAY or room.day_stage != DAY_STAGE_NOMINATION:
             await callback.answer("Сейчас не этап выбора кандидата.", show_alert=True)
             return
+        if not day_vote_skip_enabled(room):
+            await callback.answer("Пропуск дневного голосования отключен в настройках.", show_alert=True)
+            return
 
         if callback.from_user.id in room.day_votes:
             await callback.answer("Выбор уже зафиксирован до конца голосования.", show_alert=True)
@@ -3454,10 +3918,11 @@ async def on_action_callback(callback: CallbackQuery) -> None:
         await callback.message.edit_text(
             build_action_prompt_text(room, callback.from_user.id) + "\n\nТы выбрал пропуск",
         )
-        await callback.bot.send_message(
-            room.chat_id,
-            f"{player_profile_link(voter)} пропускает голосование.",
-        )
+        if not is_secret_voting_enabled(room):
+            await callback.bot.send_message(
+                room.chat_id,
+                f"{player_profile_link(voter)} пропускает голосование.",
+            )
 
         await maybe_finish_phase_early(callback.bot, room)
         persist_room(room)
@@ -3471,7 +3936,7 @@ async def on_action_callback(callback: CallbackQuery) -> None:
         await callback.answer(info, show_alert=not ok)
         if ok:
             target = room.get_player(target_id)
-            await announce_night_role_once(actor.role)
+            await announce_night_role_once(actor.role, target)
             if target is not None:
                 selected_name = player_display_name(target)
                 selected_user_id = target.user_id
@@ -3493,7 +3958,7 @@ async def on_action_callback(callback: CallbackQuery) -> None:
         await callback.answer(info, show_alert=not ok)
         if ok:
             target = room.get_player(target_id)
-            await announce_night_role_once(actor.role)
+            await announce_night_role_once(actor.role, target)
             if target is not None:
                 selected_name = player_display_name(target)
                 selected_user_id = target.user_id
@@ -3515,7 +3980,7 @@ async def on_action_callback(callback: CallbackQuery) -> None:
         await callback.answer(info, show_alert=not ok)
         if ok:
             target = room.get_player(target_id)
-            await announce_night_role_once(actor.role)
+            await announce_night_role_once(actor.role, target)
             if target is not None:
                 selected_name = player_display_name(target)
                 selected_user_id = target.user_id
@@ -3537,6 +4002,7 @@ async def on_action_callback(callback: CallbackQuery) -> None:
         await callback.answer(info, show_alert=not ok)
         if ok:
             target = room.get_player(target_id)
+            await announce_night_role_once(actor.role, target)
             if target is not None:
                 selected_name = player_display_name(target)
                 selected_user_id = target.user_id
@@ -3562,7 +4028,35 @@ async def on_noop_callback(callback: CallbackQuery) -> None:
         await callback.answer("Выбор уже зафиксирован.", show_alert=True)
         return
     if callback.data.startswith("noop:skip:"):
-        await callback.answer("Вы пропустили ход.", show_alert=True)
+        if callback.from_user is None or callback.message is None:
+            return
+        try:
+            chat_id = int(callback.data.split(":", 2)[2])
+        except (IndexError, ValueError):
+            await callback.answer("Некорректный пропуск хода.", show_alert=True)
+            return
+        room = storage.get_room(chat_id)
+        if room is None or room.phase != PHASE_NIGHT:
+            await callback.answer("Сейчас нельзя пропустить ход.", show_alert=True)
+            return
+        if callback.message.chat.type != "private":
+            await callback.answer("Пропуск ночного хода доступен только в ЛС бота.", show_alert=True)
+            return
+        if not night_action_skip_enabled(room):
+            await callback.answer("Пропуск ночного хода отключен в настройках.", show_alert=True)
+            return
+        ok, info = room.set_night_skip(callback.from_user.id)
+        await callback.answer(info, show_alert=not ok)
+        if not ok:
+            return
+        try:
+            await callback.message.edit_text(
+                build_action_prompt_text(room, callback.from_user.id) + "\n\nТы выбрал пропуск",
+            )
+        except Exception:
+            pass
+        persist_room(room)
+        await maybe_finish_phase_early(callback.bot, room)
         return
     if callback.data == "noop:silenced":
         await callback.answer(MISTRESS_DAY_BLOCK_TOAST)
@@ -3644,8 +4138,21 @@ async def on_private_menu_callback(callback: CallbackQuery) -> None:
         stats = repo.get_player_stats(callback.from_user.id)
         await show_menu_screen(
             format_private_profile_text(user_nickname(callback.from_user), stats),
-            private_back_to_menu_keyboard(),
+            private_profile_keyboard(),
         )
+        await safe_answer()
+        return
+    if action == "buffs":
+        await show_menu_screen(format_buffs_shop_text(), private_buffs_shop_keyboard())
+        await safe_answer()
+        return
+    if action.startswith("buff:"):
+        key = action.split(":", maxsplit=1)[1]
+        if key not in BUFF_CATALOG:
+            await safe_answer("Неизвестный баф.", show_alert=True)
+            return
+        stats = repo.get_player_stats(callback.from_user.id)
+        await show_menu_screen(format_buff_details_text(key, stats), private_buff_details_keyboard())
         await safe_answer()
         return
     await safe_answer("Неизвестный пункт меню.", show_alert=True)
@@ -3807,6 +4314,59 @@ async def on_private_settings_callback(callback: CallbackQuery) -> None:
         await safe_answer()
         return
 
+    if action == "mafia_ratio":
+        await show_settings_screen(SETTINGS_MAFIA_RATIO_TEXT, private_settings_mafia_ratio_keyboard(chat_id, settings))
+        await safe_answer()
+        return
+
+    if action == "mafia_ratio_set" and len(parts) == 4:
+        value = parts[3]
+        if value not in SETTINGS_MAFIA_RATIO_TITLES:
+            await safe_answer("Неизвестный параметр.", show_alert=True)
+            return
+        settings["mafia_ratio"] = value
+        settings = save_chat_settings(chat_id, settings)
+        await show_settings_screen(SETTINGS_MAFIA_RATIO_TEXT, private_settings_mafia_ratio_keyboard(chat_id, settings))
+        await safe_answer("Сохранено")
+        return
+
+    if action == "voting_mode":
+        await show_settings_screen(SETTINGS_VOTING_MODE_TEXT, private_settings_voting_mode_keyboard(chat_id, settings))
+        await safe_answer()
+        return
+
+    if action == "voting_mode_set" and len(parts) == 4:
+        value = parts[3]
+        if value not in SETTINGS_VOTING_MODE_TITLES:
+            await safe_answer("Неизвестный параметр.", show_alert=True)
+            return
+        settings["voting_mode"] = value
+        settings = save_chat_settings(chat_id, settings)
+        await show_settings_screen(SETTINGS_VOTING_MODE_TEXT, private_settings_voting_mode_keyboard(chat_id, settings))
+        await safe_answer("Сохранено")
+        return
+
+    if action == "misc_item" and len(parts) == 4:
+        key = parts[3]
+        title = SETTINGS_MISC_TITLES.get(key)
+        if title is None:
+            await safe_answer("Неизвестный параметр.", show_alert=True)
+            return
+        await show_settings_screen(title, private_settings_misc_toggle_keyboard(chat_id, settings, key))
+        await safe_answer()
+        return
+
+    if action == "misc_set" and len(parts) == 5:
+        key = parts[3]
+        if key not in settings.get("misc", {}):
+            await safe_answer("Неизвестный параметр.", show_alert=True)
+            return
+        settings["misc"][key] = parts[4] == "1"
+        settings = save_chat_settings(chat_id, settings)
+        await show_settings_screen(SETTINGS_MISC_TITLES[key], private_settings_misc_toggle_keyboard(chat_id, settings, key))
+        await safe_answer("Сохранено")
+        return
+
     if action == "leave":
         await show_settings_screen(
             "Выберите длительность, в течение которой пользователь не сможет присоединяться к игре, если он досрочно покинул предыдущую игру.",
@@ -3858,7 +4418,7 @@ async def on_private_text(message: Message) -> None:
         safe_name = escape((raw_name or "").strip() or f"Игрок {message.from_user.id}")
         player_mark = f"<a href=\"tg://user?id={message.from_user.id}\">{safe_name}</a>"
         safe_payload = escape(payload)
-        await message.answer("Предсмертное сообщение принято.")
+        await message.answer("Предсмертное сообщение принято.", **private_game_send_kwargs(last_word_room))
         await message.bot.send_message(
             last_word_room.chat_id,
             f"Кто-то из жителей слышал, как {player_mark} кричал перед смертью:\n<b>{safe_payload}</b>",
@@ -3893,7 +4453,7 @@ async def on_private_text(message: Message) -> None:
         if teammate.user_id == actor.user_id:
             continue
         try:
-            await message.bot.send_message(teammate.user_id, relay_text)
+            await message.bot.send_message(teammate.user_id, relay_text, **private_game_send_kwargs(room))
         except Exception:
             continue
 
@@ -3959,7 +4519,9 @@ async def enforce_group_game_rules(message: Message) -> None:
     is_participant = sender is not None
     is_alive_player = sender is not None and sender.alive
     is_command = bool(message.text and message.text.startswith("/"))
-    has_forbidden_media = any(
+    misc_settings = room_chat_settings(room).get("misc", {})
+    media_delete_enabled = bool(misc_settings.get("delete_media", False))
+    has_forbidden_media = media_delete_enabled and any(
         [
             bool(message.photo),
             message.video is not None,
@@ -3968,6 +4530,10 @@ async def enforce_group_game_rules(message: Message) -> None:
             message.document is not None,
             message.voice is not None,
             message.video_note is not None,
+        ]
+    )
+    has_forbidden_attachment = any(
+        [
             message.poll is not None,
             message.location is not None,
             message.contact is not None,
@@ -3976,7 +4542,7 @@ async def enforce_group_game_rules(message: Message) -> None:
         ]
     )
 
-    if has_forbidden_media:
+    if has_forbidden_media or has_forbidden_attachment:
         await safe_delete_message(message)
         await process_rule_violation(message)
         return
