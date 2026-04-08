@@ -472,6 +472,17 @@ def selected_square(active: bool) -> str:
     return "⬛" if active else "⬜"
 
 
+def format_settings_screen_text(text: str) -> str:
+    parts = str(text).split("\n", 1)
+    header = parts[0].strip()
+    if not header:
+        return text
+    if len(parts) == 1:
+        return f"<b>{header}</b>"
+    body = parts[1].lstrip("\n")
+    return f"<b>{header}</b>\n\n{body}"
+
+
 def format_leave_duration(seconds: int) -> str:
     if seconds <= 0:
         return "Выключено"
@@ -1135,16 +1146,16 @@ def format_private_profile_text(display_name: str, stats: dict | None) -> str:
         f"💵 Деньги: <b>{money}</b>\n"
         f"🎟 Билетики: <b>{tickets}</b>\n\n"
         "<b>🚀 Бафы</b>\n"
-        f"📁 Документы: <b>{buff_documents}</b>\n"
+        f"📂 Документы: <b>{buff_documents}</b>\n"
         f"🛡 Защита: <b>{buff_shield}</b>\n"
-        f"🕺 Активная роль: <b>{buff_active_role}</b>\n\n"
+        f"🎎 Активная роль: <b>{buff_active_role}</b>\n\n"
         f"🎭 Последняя роль: {last_role_mark}"
     )
 
 
 BUFF_CATALOG = {
     "documents": {
-        "title": "📁 Документы",
+        "title": "📂 Документы",
         "price": "💵150",
         "price_value": 150,
         "currency": "money",
@@ -1164,7 +1175,7 @@ BUFF_CATALOG = {
         "details": "Если защита уже была в инвентаре до старта партии, она сработает один раз за игру при первой попытке ночного убийства.",
     },
     "active_role": {
-        "title": "🕺 Активная роль",
+        "title": "🎎 Активная роль",
         "price": "💎1",
         "price_value": 1,
         "currency": "tickets",
@@ -1179,11 +1190,11 @@ BUFF_CATALOG = {
 def format_buffs_shop_text() -> str:
     return (
         "<b>Что будем покупать?</b>\n\n"
-        "📁 <b>Документы</b>\n"
+        "📂 <b>Документы</b>\n"
         f"{BUFF_CATALOG['documents']['description']}\n\n"
         "🛡 <b>Защита</b>\n"
         f"{BUFF_CATALOG['shield']['description']}\n\n"
-        "🕺 <b>Активная роль</b>\n"
+        "🎎 <b>Активная роль</b>\n"
         f"{BUFF_CATALOG['active_role']['description']}"
     )
 
@@ -2359,7 +2370,7 @@ async def announce_don_transfer(room, bot: Bot, don_successor_id: int | None) ->
         return
 
     don_name = player_display_name(new_don)
-    await bot.send_message(room.chat_id, "🤵🏼 Мафия унаследовал роль 🤵🏻 Дон")
+    await bot.send_message(room.chat_id, "<b>🤵🏼 Мафия</b> унаследовал роль <b>🤵🏻 Дон</b>")
     await send_mafia_private_update(
         room,
         bot,
@@ -4302,10 +4313,11 @@ async def on_private_settings_callback(callback: CallbackQuery) -> None:
         return
 
     async def show_settings_screen(text: str, keyboard: InlineKeyboardMarkup | None) -> None:
+        formatted_text = format_settings_screen_text(text)
         try:
-            await callback.message.edit_text(text, reply_markup=keyboard)
+            await callback.message.edit_text(formatted_text, reply_markup=keyboard)
         except Exception:
-            await callback.message.answer(text, reply_markup=keyboard)
+            await callback.message.answer(formatted_text, reply_markup=keyboard)
 
     parts = callback.data.split(":")
     if len(parts) < 3:
