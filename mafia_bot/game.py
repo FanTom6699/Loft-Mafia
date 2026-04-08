@@ -286,6 +286,7 @@ class GameRoom:
     commissar_target_id: int | None = None
     commissar_shot_target_id: int | None = None
     commissar_known_roles: dict[int, str] = field(default_factory=dict)
+    pending_sergeant_check: dict[str, object] | None = None
     advocate_target_id: int | None = None
     maniac_target_id: int | None = None
     mistress_target_id: int | None = None
@@ -353,6 +354,7 @@ class GameRoom:
         self.commissar_target_id = None
         self.commissar_shot_target_id = None
         self.commissar_known_roles.clear()
+        self.pending_sergeant_check = None
         self.advocate_target_id = None
         self.maniac_target_id = None
         self.mistress_target_id = None
@@ -418,6 +420,7 @@ class GameRoom:
         self.commissar_target_id = None
         self.commissar_shot_target_id = None
         self.commissar_known_roles.clear()
+        self.pending_sergeant_check = None
         self.advocate_target_id = None
         self.maniac_target_id = None
         self.mistress_target_id = None
@@ -559,6 +562,17 @@ class GameRoom:
 
     def remember_commissar_check(self, target_user_id: int, result_role: str) -> None:
         self.commissar_known_roles[target_user_id] = result_role
+
+    def set_pending_sergeant_check(self, target_user_id: int, result_role: str) -> None:
+        self.pending_sergeant_check = {
+            "target_user_id": int(target_user_id),
+            "result_role": str(result_role),
+        }
+
+    def pop_pending_sergeant_check(self) -> dict[str, object] | None:
+        payload = self.pending_sergeant_check
+        self.pending_sergeant_check = None
+        return payload
 
     def forget_dead_commissar_checks(self) -> None:
         alive_ids = {player.user_id for player in self.alive_players()}
@@ -1203,6 +1217,7 @@ class GameRoom:
         self.night_reports.clear()
         self.last_doctor_saved_target_id = None
         self.day_silenced_user_id = None
+        self.pending_sergeant_check = None
 
         mistress = next((p for p in self.alive_players() if p.role == ROLE_MISTRESS), None)
         mistress_target_id: int | None = None
@@ -1320,6 +1335,7 @@ class GameRoom:
                     if masked_by_advocate and notify_actions:
                         self.add_night_report_line(checked.user_id, "Но 👨🏼‍💼 Адвокат сказал, что ты 👨🏼 Мирный житель!")
                     self.remember_commissar_check(checked.user_id, ROLE_CITIZEN)
+                    self.set_pending_sergeant_check(checked.user_id, ROLE_CITIZEN)
                     self.add_night_report_line(
                         commissar.user_id,
                         f"<a href=\"tg://user?id={checked.user_id}\">{escape((checked.full_name or '').strip() or f'Игрок {checked.user_id}')}</a> - 👨🏼 <b>{ROLE_CITIZEN}</b>",
@@ -1334,12 +1350,14 @@ class GameRoom:
                         if notify_actions:
                             self.add_night_report_line(checked.user_id, "Но 👨🏼‍💼 Адвокат сказал, что ты 👨🏼 Мирный житель!")
                         self.remember_commissar_check(checked.user_id, ROLE_CITIZEN)
+                        self.set_pending_sergeant_check(checked.user_id, ROLE_CITIZEN)
                         self.add_night_report_line(
                             commissar.user_id,
                             f"<a href=\"tg://user?id={checked.user_id}\">{escape((checked.full_name or '').strip() or f'Игрок {checked.user_id}')}</a> - 👨🏼 <b>{ROLE_CITIZEN}</b>",
                         )
                     else:
                         self.remember_commissar_check(checked.user_id, checked.role)
+                        self.set_pending_sergeant_check(checked.user_id, checked.role)
                         self.add_night_report_line(
                             commissar.user_id,
                             self.commissar_check_result_text(checked),

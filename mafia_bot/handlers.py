@@ -282,8 +282,8 @@ def night_role_announcement_text(room, role_name: str, target=None, *, variant: 
         target_mark = player_profile_link(target)
         targeted_announcements = {
             ROLE_COMMISSAR: {
-                "default": f"<b>🕵️ Комиссар Каттани</b> решил проверить {target_mark}.",
-                "shoot": f"<b>🕵️ Комиссар Каттани</b> решил застрелить {target_mark}.",
+                "default": f"<b>🕵️ Комиссар Каттани</b> проверяет {target_mark}.",
+                "shoot": f"<b>🕵️ Комиссар Каттани</b> стреляет в {target_mark}.",
             },
             ROLE_BUM: {
                 "default": f"<b>🧙🏼‍♂️ Бомж</b> пошёл за бутылкой к {target_mark}.",
@@ -2413,6 +2413,15 @@ def compact_night_report_messages(lines: list[str]) -> list[str]:
     return messages
 
 
+def sergeant_commissar_check_text(room, target_user_id: int, result_role: str) -> str:
+    checked_player = room.get_player(target_user_id)
+    if checked_player is None:
+        checked_mark = f"Игрок {target_user_id}"
+    else:
+        checked_mark = player_profile_link(checked_player)
+    return f"🕵️‍ Комиссар Каттани проверил {checked_mark}. Он - {role_mark_text(result_role)}"
+
+
 async def process_night_end(bot: Bot, chat_id: int, timer_reason: str | None = None) -> None:
     lock = get_phase_lock(chat_id)
     async with lock:
@@ -2460,6 +2469,25 @@ async def process_night_end(bot: Bot, chat_id: int, timer_reason: str | None = N
                     await safe_send_message(bot, user_id, message_text, **private_game_send_kwargs(room))
             except Exception:
                 continue
+
+        pending_sergeant_check = room.pop_pending_sergeant_check()
+        if pending_sergeant_check is not None:
+            sergeant = next(
+                (player for player in room.alive_players() if player.role == ROLE_SERGEANT),
+                None,
+            )
+            if sergeant is not None:
+                target_user_id = int(pending_sergeant_check["target_user_id"])
+                result_role = str(pending_sergeant_check["result_role"])
+                try:
+                    await safe_send_message(
+                        bot,
+                        sergeant.user_id,
+                        sergeant_commissar_check_text(room, target_user_id, result_role),
+                        **private_game_send_kwargs(room),
+                    )
+                except Exception:
+                    pass
 
         spent_shield_user_ids = room.pop_spent_shield_user_ids()
         shield_triggered = False

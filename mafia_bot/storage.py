@@ -138,6 +138,7 @@ class GameStateRepository:
             "commissar_target_id": room.commissar_target_id,
             "commissar_shot_target_id": room.commissar_shot_target_id,
             "commissar_known_roles": room.commissar_known_roles,
+            "pending_sergeant_check": room.pending_sergeant_check,
             "advocate_target_id": room.advocate_target_id,
             "maniac_target_id": room.maniac_target_id,
             "mistress_target_id": room.mistress_target_id,
@@ -220,6 +221,19 @@ class GameStateRepository:
             int(k): str(v)
             for k, v in payload.get("commissar_known_roles", {}).items()
         }
+        raw_pending_sergeant_check = payload.get("pending_sergeant_check")
+        if isinstance(raw_pending_sergeant_check, dict):
+            target_user_id = raw_pending_sergeant_check.get("target_user_id")
+            result_role = raw_pending_sergeant_check.get("result_role")
+            if isinstance(target_user_id, int) and isinstance(result_role, str):
+                room.pending_sergeant_check = {
+                    "target_user_id": target_user_id,
+                    "result_role": result_role,
+                }
+            else:
+                room.pending_sergeant_check = None
+        else:
+            room.pending_sergeant_check = None
         room.advocate_target_id = payload.get("advocate_target_id")
         room.maniac_target_id = payload.get("maniac_target_id")
         room.mistress_target_id = payload.get("mistress_target_id")
