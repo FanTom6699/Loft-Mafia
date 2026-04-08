@@ -846,6 +846,7 @@ async def launch_game_from_registration(bot: Bot, room, chat_id: int, chat_title
     room.close_registration()
     try:
         room.assign_roles()
+        prime_room_documents(room)
         prime_room_shields(room)
         print(
             f"[DEBUG] launch_game_from_registration: chat_id={chat_id}, "
@@ -1141,7 +1142,7 @@ BUFF_CATALOG = {
         "inventory_key": "buff_documents",
         "success_name": "Документы",
         "description": "Фальшивые документы могут пригодиться когда твою роль кто-то захочет проверить",
-        "details": "Каркас механики: предмет будет расходником. В будущем его можно привязать к скрытию роли при одной проверке.",
+        "details": "Если документы были в инвентаре до старта партии, первая проверка комиссара для мафии, адвоката или маньяка покажет мирного жителя.",
     },
     "shield": {
         "title": "🛡 Защита",
@@ -1183,16 +1184,24 @@ def format_buff_details_text(key: str, stats: dict | None) -> str:
     inventory_key = str(item["inventory_key"])
     owned = int((stats or {}).get(inventory_key, 0))
     status_line = ""
-    if key == "shield":
+    if key in {"documents", "shield"}:
         room = get_player_profile_room(int((stats or {}).get("user_id", 0))) if stats is not None else None
         if room is not None and room.get_player(int((stats or {}).get("user_id", 0))) is not None:
             user_id = int((stats or {}).get("user_id", 0))
-            if user_id in room.spent_shield_user_ids:
-                status_line = "🧯 На эту игру защита уже была потрачена.\n\n"
-            elif user_id in room.shielded_user_ids:
-                status_line = "✨ Защита активна в текущей игре.\n\n"
-            elif owned > 0:
-                status_line = "⏳ Купленная во время этой игры защита сработает только в следующей партии.\n\n"
+            if key == "shield":
+                if user_id in room.spent_shield_user_ids:
+                    status_line = "🧯 На эту игру защита уже была потрачена.\n\n"
+                elif user_id in room.shielded_user_ids:
+                    status_line = "✨ Защита активна в текущей игре.\n\n"
+                elif owned > 0:
+                    status_line = "⏳ Купленная во время этой игры защита сработает только в следующей партии.\n\n"
+            if key == "documents":
+                if user_id in room.spent_documents_user_ids:
+                    status_line = "📂 На эту игру документы уже были использованы.\n\n"
+                elif user_id in room.documented_user_ids:
+                    status_line = "✨ Документы активны в текущей игре.\n\n"
+                elif owned > 0:
+                    status_line = "⏳ Купленные во время этой игры документы сработают только в следующей партии.\n\n"
     return (
         f"<b>{item['title']}</b>\n\n"
         f"{item['description']}\n\n"
@@ -1200,8 +1209,20 @@ def format_buff_details_text(key: str, stats: dict | None) -> str:
         f"🎒 В инвентаре: <b>{owned}</b>\n\n"
         f"{status_line}"
         f"{item['details']}\n\n"
-        "<i>Документы и Активная роль пока остаются каркасом. Защита уже работает.</i>"
+        "<i>Активная роль пока остаётся каркасом. Защита и Документы уже работают.</i>"
     )
+
+
+def prime_room_documents(room) -> None:
+    room.documented_user_ids.clear()
+    room.spent_documents_user_ids.clear()
+    for player in room.players.values():
+        stats = repo.get_player_stats(player.user_id)
+        if stats is None:
+            continue
+        if int(stats.get("buff_documents", 0)) > 0:
+            room.arm_documents(player.user_id)
+
 
 def prime_room_shields(room) -> None:
     room.shielded_user_ids.clear()
@@ -2445,6 +2466,10 @@ async def process_night_end(bot: Bot, chat_id: int, timer_reason: str | None = N
         for user_id in spent_shield_user_ids:
             if repo.consume_shield_buff(user_id):
                 shield_triggered = True
+
+        spent_documents_user_ids = room.pop_spent_documents_user_ids()
+        for user_id in spent_documents_user_ids:
+            repo.consume_documents_buff(user_id)
 
         if shield_triggered:
             await bot.send_message(chat_id, "🌟 Кто-то из игроков потратил защиту")

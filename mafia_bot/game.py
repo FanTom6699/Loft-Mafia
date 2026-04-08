@@ -29,6 +29,7 @@ ROLE_KAMIKAZE = "Камикадзе"
 ROLE_CITIZEN = "Мирный житель"
 
 MAFIA_ROLES = {ROLE_DON, ROLE_MAFIA}
+DOCUMENTS_FAKEABLE_ROLES = {ROLE_DON, ROLE_MAFIA, ROLE_ADVOCATE, ROLE_MANIAC}
 
 ROLE_EMOJI = {
     ROLE_DON: "🤵🏻",
@@ -293,6 +294,8 @@ class GameRoom:
     bum_last_target_id: int | None = None
     kamikaze_pending_user_id: int | None = None
     kamikaze_target_id: int | None = None
+    documented_user_ids: set[int] = field(default_factory=set)
+    spent_documents_user_ids: set[int] = field(default_factory=set)
     shielded_user_ids: set[int] = field(default_factory=set)
     spent_shield_user_ids: set[int] = field(default_factory=set)
     night_missed_streaks: dict[int, int] = field(default_factory=dict)
@@ -358,6 +361,8 @@ class GameRoom:
         self.bum_last_target_id = None
         self.kamikaze_pending_user_id = None
         self.kamikaze_target_id = None
+        self.documented_user_ids.clear()
+        self.spent_documents_user_ids.clear()
         self.shielded_user_ids.clear()
         self.spent_shield_user_ids.clear()
         self.night_missed_streaks.clear()
@@ -421,6 +426,8 @@ class GameRoom:
         self.bum_last_target_id = None
         self.kamikaze_pending_user_id = None
         self.kamikaze_target_id = None
+        self.documented_user_ids.clear()
+        self.spent_documents_user_ids.clear()
         self.shielded_user_ids.clear()
         self.spent_shield_user_ids.clear()
         self.night_missed_streaks.clear()
@@ -768,6 +775,22 @@ class GameRoom:
             return False
         self.shielded_user_ids.add(user_id)
         return True
+
+    def arm_documents(self, user_id: int) -> bool:
+        player = self.get_player(user_id)
+        if player is None or not player.alive:
+            return False
+        if not self.started or self.phase == PHASE_FINISHED:
+            return False
+        if user_id in self.spent_documents_user_ids:
+            return False
+        self.documented_user_ids.add(user_id)
+        return True
+
+    def pop_spent_documents_user_ids(self) -> set[int]:
+        payload = set(self.spent_documents_user_ids)
+        self.spent_documents_user_ids.clear()
+        return payload
 
     def pop_spent_shield_user_ids(self) -> set[int]:
         payload = set(self.spent_shield_user_ids)
@@ -1284,24 +1307,43 @@ class GameRoom:
         if commissar is not None and commissar_check_target_id is not None:
             checked = self.get_player(commissar_check_target_id)
             if checked is not None and checked.alive:
-                if notify_actions:
-                    self.add_night_report_line(checked.user_id, "Кто-то сильно заинтересовался твоей ролью...")
                 mafia_checked = checked.role in MAFIA_ROLES
                 masked_by_advocate = mafia_checked and advocate_target_id == checked.user_id
-                if masked_by_advocate:
-                    if notify_actions:
+                fake_documents_used = (
+                    checked.role in DOCUMENTS_FAKEABLE_ROLES and checked.user_id in self.documented_user_ids
+                )
+                if fake_documents_used:
+                    self.documented_user_ids.discard(checked.user_id)
+                    self.spent_documents_user_ids.add(checked.user_id)
+                    self.add_night_report_line(checked.user_id, "Кто-то сильно заинтересовался твоей ролью...")
+                    self.add_night_report_line(checked.user_id, "Но ты показал фальшивые 📂 Документы :)")
+                    if masked_by_advocate and notify_actions:
                         self.add_night_report_line(checked.user_id, "Но 👨🏼‍💼 Адвокат сказал, что ты 👨🏼 Мирный житель!")
                     self.remember_commissar_check(checked.user_id, ROLE_CITIZEN)
                     self.add_night_report_line(
                         commissar.user_id,
                         f"<a href=\"tg://user?id={checked.user_id}\">{escape((checked.full_name or '').strip() or f'Игрок {checked.user_id}')}</a> - 👨🏼 <b>{ROLE_CITIZEN}</b>",
                     )
+                    checked = None
+                elif notify_actions:
+                    self.add_night_report_line(checked.user_id, "Кто-то сильно заинтересовался твоей ролью...")
+                if checked is None:
+                    pass
                 else:
-                    self.remember_commissar_check(checked.user_id, checked.role)
-                    self.add_night_report_line(
-                        commissar.user_id,
-                        self.commissar_check_result_text(checked),
-                    )
+                    if masked_by_advocate:
+                        if notify_actions:
+                            self.add_night_report_line(checked.user_id, "Но 👨🏼‍💼 Адвокат сказал, что ты 👨🏼 Мирный житель!")
+                        self.remember_commissar_check(checked.user_id, ROLE_CITIZEN)
+                        self.add_night_report_line(
+                            commissar.user_id,
+                            f"<a href=\"tg://user?id={checked.user_id}\">{escape((checked.full_name or '').strip() or f'Игрок {checked.user_id}')}</a> - 👨🏼 <b>{ROLE_CITIZEN}</b>",
+                        )
+                    else:
+                        self.remember_commissar_check(checked.user_id, checked.role)
+                        self.add_night_report_line(
+                            commissar.user_id,
+                            self.commissar_check_result_text(checked),
+                        )
 
         attacks: dict[int, list[str]] = {}
         if mafia_target_id is not None:

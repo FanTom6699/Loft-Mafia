@@ -146,6 +146,8 @@ class GameStateRepository:
             "bum_last_target_id": room.bum_last_target_id,
             "kamikaze_pending_user_id": room.kamikaze_pending_user_id,
             "kamikaze_target_id": room.kamikaze_target_id,
+            "documented_user_ids": sorted(room.documented_user_ids),
+            "spent_documents_user_ids": sorted(room.spent_documents_user_ids),
             "shielded_user_ids": sorted(room.shielded_user_ids),
             "spent_shield_user_ids": sorted(room.spent_shield_user_ids),
             "night_missed_streaks": room.night_missed_streaks,
@@ -226,6 +228,8 @@ class GameStateRepository:
         room.bum_last_target_id = payload.get("bum_last_target_id")
         room.kamikaze_pending_user_id = payload.get("kamikaze_pending_user_id")
         room.kamikaze_target_id = payload.get("kamikaze_target_id")
+        room.documented_user_ids = {int(v) for v in payload.get("documented_user_ids", [])}
+        room.spent_documents_user_ids = {int(v) for v in payload.get("spent_documents_user_ids", [])}
         room.shielded_user_ids = {int(v) for v in payload.get("shielded_user_ids", [])}
         room.spent_shield_user_ids = {int(v) for v in payload.get("spent_shield_user_ids", [])}
         room.night_missed_streaks = {
@@ -443,20 +447,30 @@ class GameStateRepository:
             currency_label="денег",
         )
 
-    def consume_shield_buff(self, user_id: int) -> bool:
+    def consume_buff(self, user_id: int, *, inventory_column: str) -> bool:
+        allowed_inventory_columns = {"buff_documents", "buff_shield", "buff_active_role"}
+        if inventory_column not in allowed_inventory_columns:
+            return False
+
         now = datetime.now().isoformat()
         with sqlite3.connect(self.db_path) as conn:
             cursor = conn.execute(
-                """
+                f"""
                 UPDATE player_stats
-                SET buff_shield = buff_shield - 1,
+                SET {inventory_column} = {inventory_column} - 1,
                     updated_at = ?
-                WHERE user_id = ? AND buff_shield > 0
+                WHERE user_id = ? AND {inventory_column} > 0
                 """,
                 (now, user_id),
             )
             conn.commit()
             return cursor.rowcount > 0
+
+    def consume_shield_buff(self, user_id: int) -> bool:
+        return self.consume_buff(user_id, inventory_column="buff_shield")
+
+    def consume_documents_buff(self, user_id: int) -> bool:
+        return self.consume_buff(user_id, inventory_column="buff_documents")
 
     def touch_private_user(self, user_id: int, display_name: str) -> bool:
         now = datetime.now().isoformat()
