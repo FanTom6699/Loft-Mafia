@@ -247,6 +247,11 @@ class Player:
     alive: bool = True
 
 
+def player_link(player: Player) -> str:
+    safe_name = escape((player.full_name or "").strip() or f"Игрок {player.user_id}")
+    return f"<a href=\"tg://user?id={player.user_id}\">{safe_name}</a>"
+
+
 @dataclass
 class GameRoom:
     chat_id: int
@@ -256,8 +261,7 @@ class GameRoom:
     def commissar_check_result_text(self, checked_player) -> str:
         role = checked_player.role
         emoji = ROLE_EMOJI.get(role, "")
-        safe_name = escape((checked_player.full_name or "").strip() or f"Игрок {checked_player.user_id}")
-        name_link = f"<a href=\"tg://user?id={checked_player.user_id}\">{safe_name}</a>"
+        name_link = player_link(checked_player)
         return f"{name_link} - {emoji} <b>{role}</b>"
     chat_title: str = ""
     players: dict[int, Player] = field(default_factory=dict)
@@ -544,7 +548,7 @@ class GameRoom:
         new_don = min(candidates, key=lambda p: p.user_id)
         new_don.role = ROLE_DON
         self.last_don_successor_id = new_don.user_id
-        return f"После {reason} новым Доном становится {new_don.full_name}.", new_don.user_id
+        return f"После {reason} новым Доном становится {player_link(new_don)}.", new_don.user_id
 
     def transfer_commissar_if_needed(self) -> tuple[str, int] | None:
         alive_commissar = next((p for p in self.alive_players() if p.role == ROLE_COMMISSAR), None)
@@ -1479,7 +1483,7 @@ class GameRoom:
         if bum is not None and self.bum_target_id is not None:
             observed = self.get_player(self.bum_target_id)
             if observed is not None:
-                observed_name = (observed.full_name or "").strip() or f"Игрок {observed.user_id}"
+                observed_name = player_link(observed)
                 visitors: list[Player] = []
                 seen_ids: set[int] = set()
 
@@ -1515,10 +1519,7 @@ class GameRoom:
                         add_visitor(don.user_id)
 
                 if visitors:
-                    visitor_names = ", ".join(
-                        ((player.full_name or "").strip() or f"Игрок {player.user_id}")
-                        for player in visitors
-                    )
+                    visitor_names = ", ".join(player_link(player) for player in visitors)
                     self.add_night_report_line(
                         bum.user_id,
                         f"Ночью ты пришёл за бутылкой к {observed_name} и увидел там {visitor_names}",
@@ -1883,10 +1884,6 @@ class GameRoom:
         winners: list[Player] = []
         others: list[Player] = []
 
-        def player_link(player: Player) -> str:
-            safe_name = escape((player.full_name or "").strip() or f"Игрок {player.user_id}")
-            return f"<a href=\"tg://user?id={player.user_id}\">{safe_name}</a>"
-
         for player in self.players.values():
             is_winner = (
                 winner == "Мафия" and player.role in MAFIA_ROLES
@@ -1970,7 +1967,7 @@ class GameRoom:
             f"Продлений: {self.registration_extensions}",
         ]
         for i, player in enumerate(self.players.values(), start=1):
-            lines.append(f"{i}. {player.full_name}")
+            lines.append(f"{i}. {player_link(player)}")
         return "\n".join(lines)
 
 

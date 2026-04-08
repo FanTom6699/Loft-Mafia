@@ -2310,8 +2310,9 @@ async def push_phase_action_menus(bot: Bot, room) -> None:
         except Exception:
             await bot.send_message(
                 room.chat_id,
-                f"Не смог отправить меню хода игроку {player.full_name}."
-                " Пусть напишет боту /start в личке."
+                f"Не смог отправить меню хода игроку {player_profile_link(player)}."
+                " Пусть напишет боту /start в личке.",
+                parse_mode="HTML",
             )
 
 
@@ -2346,6 +2347,7 @@ async def push_trial_vote_menus(bot: Bot, room, candidate) -> None:
             room.chat_id,
             trial_vote_prompt_text(room, candidate),
             reply_markup=trial_vote_keyboard(room.chat_id, yes_count, no_count),
+            parse_mode="HTML",
         )
     except Exception as e:
         print(f"[ERROR] push_trial_vote_menus: chat_id={room.chat_id}, error={e!r}")
@@ -2356,7 +2358,12 @@ async def send_mafia_private_update(room, bot, text: str) -> None:
         if player.role not in {ROLE_DON, ROLE_MAFIA}:
             continue
         try:
-            await bot.send_message(player.user_id, text, **private_game_send_kwargs(room))
+            await bot.send_message(
+                player.user_id,
+                text,
+                parse_mode="HTML",
+                **private_game_send_kwargs(room),
+            )
         except Exception:
             continue
 
@@ -2369,7 +2376,7 @@ async def announce_don_transfer(room, bot: Bot, don_successor_id: int | None) ->
     if new_don is None:
         return
 
-    don_name = player_display_name(new_don)
+    don_name = player_profile_link(new_don)
     await bot.send_message(room.chat_id, "<b>🤵🏼 Мафия</b> унаследовал роль <b>🤵🏻 Дон</b>")
     await send_mafia_private_update(
         room,
@@ -2483,7 +2490,7 @@ async def process_night_end(bot: Bot, chat_id: int, timer_reason: str | None = N
                 for message_text in compact_night_report_messages(lines):
                     if "пытались убить, но тебе повезло" in message_text.lower():
                         lucky_triggered = True
-                    await safe_send_message(bot, user_id, message_text, **private_game_send_kwargs(room))
+                    await safe_send_message(bot, user_id, message_text, parse_mode="HTML", **private_game_send_kwargs(room))
             except Exception:
                 continue
 
@@ -2501,6 +2508,7 @@ async def process_night_end(bot: Bot, chat_id: int, timer_reason: str | None = N
                         bot,
                         sergeant.user_id,
                         sergeant_commissar_check_text(room, target_user_id, result_role),
+                        parse_mode="HTML",
                         **private_game_send_kwargs(room),
                     )
                 except Exception:
@@ -2541,7 +2549,7 @@ async def process_night_end(bot: Bot, chat_id: int, timer_reason: str | None = N
                     text = f"Сегодня был жестоко убит {dead_mark}"
                 if killer_text:
                     text += f"\n{killer_text}"
-                await bot.send_message(chat_id, text)
+                await bot.send_message(chat_id, text, parse_mode="HTML")
             if room.phase != PHASE_FINISHED:
                 non_afk_eliminated = [player for player in eliminated if player.user_id not in afk_killed_ids]
                 await prompt_last_words(bot, room, non_afk_eliminated)
@@ -2565,6 +2573,7 @@ async def process_night_end(bot: Bot, chat_id: int, timer_reason: str | None = N
                     "Кто-то из жителей слышал, как "
                     f"{dead_mark} кричал перед смертью:\n"
                     "<b>Я больше не бу-у-у-у-ду спать во время игры-ы-ы-ы-ы-ы-!</b>",
+                    parse_mode="HTML",
                 )
         else:
             await bot.send_message(chat_id, "🤷 Удивительно, но этой ночью все выжили")
@@ -2583,7 +2592,7 @@ async def process_night_end(bot: Bot, chat_id: int, timer_reason: str | None = N
             + "\n\n"
             + "Сейчас самое время обсудить результаты ночи, разобраться в причинах и следствиях..."
         )
-        await bot.send_message(chat_id, day_summary)
+        await bot.send_message(chat_id, day_summary, parse_mode="HTML")
 
         if room.phase == PHASE_FINISHED:
             room.pending_last_words.clear()
@@ -2591,7 +2600,7 @@ async def process_night_end(bot: Bot, chat_id: int, timer_reason: str | None = N
             ensure_stats_recorded(room)
             if not stats_already_recorded:
                 await send_endgame_currency_summaries(bot, room)
-            await bot.send_message(chat_id, room.final_report_text())
+            await bot.send_message(chat_id, room.final_report_text(), parse_mode="HTML")
             cancel_phase_timer(chat_id)
             persist_room(room)
             return
@@ -2754,11 +2763,12 @@ async def process_day_end(bot: Bot, chat_id: int, timer_reason: str | None = Non
                     bot,
                     chat_id,
                     f"<b>Результаты голосования:</b>\n<b>{yes_count}</b> 👍  |  <b>{no_count}</b> 👎\n\nВешаем {verdict_target}! :)",
+                    parse_mode="HTML",
                 )
                 if reveal_roles:
                     role_text = role_mark_text(first.role)
                     await asyncio.sleep(2)
-                    await safe_send_message(bot, chat_id, f"{first_mark} был {role_text}")
+                    await safe_send_message(bot, chat_id, f"{first_mark} был {role_text}", parse_mode="HTML")
                 await asyncio.sleep(2)
                 try:
                     if first.role == ROLE_KAMIKAZE:
@@ -2782,9 +2792,9 @@ async def process_day_end(bot: Bot, chat_id: int, timer_reason: str | None = Non
                     second_mark = player_profile_link(second)
                     if reveal_roles:
                         second_role = role_mark_text(second.role)
-                        await safe_send_message(bot, chat_id, f"💣 Камикадзе забрал с собой {second_mark} ({second_role}).")
+                        await safe_send_message(bot, chat_id, f"💣 Камикадзе забрал с собой {second_mark} ({second_role}).", parse_mode="HTML")
                     else:
-                        await safe_send_message(bot, chat_id, f"💣 Камикадзе забрал с собой {second_mark}.")
+                        await safe_send_message(bot, chat_id, f"💣 Камикадзе забрал с собой {second_mark}.", parse_mode="HTML")
             else:
                 await safe_send_message(
                     bot,
@@ -2804,7 +2814,7 @@ async def process_day_end(bot: Bot, chat_id: int, timer_reason: str | None = Non
                 ensure_stats_recorded(room)
                 if not stats_already_recorded:
                     await send_endgame_currency_summaries(bot, room)
-                await safe_send_message(bot, chat_id, room.final_report_text())
+                await safe_send_message(bot, chat_id, room.final_report_text(), parse_mode="HTML")
                 cancel_phase_timer(chat_id)
                 persist_room(room)
                 return
@@ -2968,7 +2978,7 @@ def mafia_allies_text(room) -> str:
     lines = ["", "<b>Запомни своих союзников:</b>"]
     for ally in allies:
         role_mark = role_mark_text(ally.role)
-        lines.append(f"  {ally.full_name} - {role_mark}")
+        lines.append(f"  {player_profile_link(ally)} - {role_mark}")
     return "\n".join(lines)
 
 
@@ -2977,11 +2987,11 @@ def city_power_allies_text(room, role: str) -> str:
     if role == ROLE_SERGEANT:
         commissar = next((player for player in room.players.values() if player.role == ROLE_COMMISSAR), None)
         if commissar is not None:
-            lines.append(f"     {commissar.full_name} - 🕵️‍ Комиссар Каттани")
+            lines.append(f"     {player_profile_link(commissar)} - 🕵️‍ Комиссар Каттани")
     elif role == ROLE_COMMISSAR:
         sergeant = next((player for player in room.players.values() if player.role == ROLE_SERGEANT), None)
         if sergeant is not None:
-            lines.append(f"     {sergeant.full_name} - 👮🏼‍♂️ Сержант")
+            lines.append(f"     {player_profile_link(sergeant)} - 👮🏼‍♂️ Сержант")
 
     if not lines:
         return ""
@@ -3329,7 +3339,7 @@ async def cmd_leave(message: Message) -> None:
         leave_text = f"{leaver_mark} не выдержал гнетущей атмосферы этого города и повесился."
         if show_roles_enabled(room):
             leave_text += f"\nОн был {role_mark_text(player.role)}"
-        await message.answer(leave_text)
+        await message.answer(leave_text, parse_mode="HTML")
 
         try:
             await message.bot.send_message(player.user_id, "Ты вышел из игры", **private_game_send_kwargs(room))
@@ -3341,7 +3351,7 @@ async def cmd_leave(message: Message) -> None:
             ensure_stats_recorded(room)
             if not stats_already_recorded:
                 await send_endgame_currency_summaries(message.bot, room)
-            await message.answer(room.final_report_text())
+            await message.answer(room.final_report_text(), parse_mode="HTML")
             cancel_phase_timer(message.chat.id)
 
         persist_room(room)
@@ -3355,7 +3365,7 @@ async def cmd_lobby(message: Message) -> None:
         await message.answer("Лобби не найдено.")
         return
 
-    await message.answer(room.lobby_text())
+    await message.answer(room.lobby_text(), parse_mode="HTML")
 
 
 @router.message(Command("extend"))
@@ -3630,7 +3640,7 @@ async def cmd_status(message: Message) -> None:
         await message.answer("Лобби не найдено.")
         return
 
-    await message.answer(room.status_text())
+    await message.answer(room.status_text(), parse_mode="HTML")
 
 
 @router.message(Command("id"))
@@ -3704,6 +3714,7 @@ async def on_trial_callback(callback: CallbackQuery) -> None:
             await callback.message.edit_text(
                 trial_vote_prompt_text(room, candidate),
                 reply_markup=trial_vote_keyboard(chat_id, yes_count, no_count),
+                parse_mode="HTML",
             )
         except Exception:
             try:
@@ -3729,7 +3740,7 @@ async def on_trial_callback(callback: CallbackQuery) -> None:
             )
             completion_text = f"{trial_vote_prompt_text(room, candidate)}\n\nГолосование завершено"
             try:
-                await callback.message.edit_text(completion_text)
+                await callback.message.edit_text(completion_text, parse_mode="HTML")
             except Exception:
                 try:
                     await callback.message.edit_reply_markup(reply_markup=None)
@@ -3814,13 +3825,13 @@ async def on_action_callback(callback: CallbackQuery) -> None:
                 await send_mafia_private_update(
                     room,
                     callback.bot,
-                    f"{role_mark} {actor.full_name} проголосовал за {target.full_name}",
+                    f"{role_mark} {player_profile_link(actor)} проголосовал за {player_profile_link(target)}",
                 )
 
             if room.mafia_vote_locked:
                 final_target_id = room.current_mafia_target_id()
                 final_target = room.get_player(final_target_id) if final_target_id is not None else None
-                final_name = final_target.full_name if final_target is not None else "цель"
+                final_name = player_profile_link(final_target) if final_target is not None else "цель"
                 await send_mafia_private_update(
                     room,
                     callback.bot,
@@ -3866,6 +3877,7 @@ async def on_action_callback(callback: CallbackQuery) -> None:
                 selected_user_id = None
             await callback.message.edit_text(
                 locked_choice_text(room, callback.from_user.id, selected_name, selected_user_id),
+                parse_mode="HTML",
             )
             await maybe_finish_phase_early(callback.bot, room)
             persist_room(room)
@@ -3912,6 +3924,7 @@ async def on_action_callback(callback: CallbackQuery) -> None:
                 selected_user_id = None
             await callback.message.edit_text(
                 locked_choice_text(room, callback.from_user.id, selected_name, selected_user_id),
+                parse_mode="HTML",
             )
             await maybe_finish_phase_early(callback.bot, room)
             persist_room(room)
@@ -3934,6 +3947,7 @@ async def on_action_callback(callback: CallbackQuery) -> None:
                 selected_user_id = None
             await callback.message.edit_text(
                 locked_choice_text(room, callback.from_user.id, selected_name, selected_user_id),
+                parse_mode="HTML",
             )
             await maybe_finish_phase_early(callback.bot, room)
             persist_room(room)
@@ -3983,12 +3997,14 @@ async def on_action_callback(callback: CallbackQuery) -> None:
 
             await callback.message.edit_text(
                 locked_choice_text(room, callback.from_user.id, selected_name, selected_user_id),
+                parse_mode="HTML",
             )
 
             if voter is not None and target is not None and not is_secret_voting_enabled(room):
                 await callback.bot.send_message(
                     room.chat_id,
                     f"{player_profile_link(voter)} проголосовал за {player_profile_link(target)}",
+                    parse_mode="HTML",
                 )
             await maybe_finish_phase_early(callback.bot, room)
             persist_room(room)
@@ -4031,6 +4047,7 @@ async def on_action_callback(callback: CallbackQuery) -> None:
             await callback.bot.send_message(
                 room.chat_id,
                 f"{player_profile_link(voter)} пропускает голосование.",
+                parse_mode="HTML",
             )
 
         await maybe_finish_phase_early(callback.bot, room)
@@ -4054,6 +4071,7 @@ async def on_action_callback(callback: CallbackQuery) -> None:
                 selected_user_id = None
             await callback.message.edit_text(
                 locked_choice_text(room, callback.from_user.id, selected_name, selected_user_id),
+                parse_mode="HTML",
             )
             await maybe_finish_phase_early(callback.bot, room)
             persist_room(room)
@@ -4076,6 +4094,7 @@ async def on_action_callback(callback: CallbackQuery) -> None:
                 selected_user_id = None
             await callback.message.edit_text(
                 locked_choice_text(room, callback.from_user.id, selected_name, selected_user_id),
+                parse_mode="HTML",
             )
             await maybe_finish_phase_early(callback.bot, room)
             persist_room(room)
@@ -4098,6 +4117,7 @@ async def on_action_callback(callback: CallbackQuery) -> None:
                 selected_user_id = None
             await callback.message.edit_text(
                 locked_choice_text(room, callback.from_user.id, selected_name, selected_user_id),
+                parse_mode="HTML",
             )
             await maybe_finish_phase_early(callback.bot, room)
             persist_room(room)
@@ -4120,6 +4140,7 @@ async def on_action_callback(callback: CallbackQuery) -> None:
                 selected_user_id = None
             await callback.message.edit_text(
                 locked_choice_text(room, callback.from_user.id, selected_name, selected_user_id),
+                parse_mode="HTML",
             )
             await maybe_finish_phase_early(callback.bot, room)
             persist_room(room)
@@ -4580,7 +4601,7 @@ async def on_private_text(message: Message) -> None:
     if teammate_roles is None:
         return
 
-    relay_author = player_display_name(actor)
+    relay_author = player_profile_link(actor)
     relay_text = f"{relay_author}:\n{text}"
     for teammate in room.alive_players():
         if teammate.role not in teammate_roles:
@@ -4588,7 +4609,12 @@ async def on_private_text(message: Message) -> None:
         if teammate.user_id == actor.user_id:
             continue
         try:
-            await message.bot.send_message(teammate.user_id, relay_text, **private_game_send_kwargs(room))
+            await message.bot.send_message(
+                teammate.user_id,
+                relay_text,
+                parse_mode="HTML",
+                **private_game_send_kwargs(room),
+            )
         except Exception:
             continue
 
@@ -4629,7 +4655,7 @@ async def on_developer_phrase(message: Message) -> None:
         pass
 
     dev_link = f"<a href=\"tg://user?id={OWNER_USER_ID}\">{display_name}</a>"
-    await message.reply(f"Это {dev_link}")
+    await message.reply(f"Это {dev_link}", parse_mode="HTML")
 
 
 @router.message(F.chat.type.in_({"group", "supergroup"}))
