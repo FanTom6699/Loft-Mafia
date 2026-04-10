@@ -1936,17 +1936,17 @@ class GameRoom:
 
         lines = ["Игра окончена!", f"Победили: {winner}", "", "Победители:"]
         for p in winners:
-            lines.append(f"  {self.public_player_mark(p)} - {ROLE_EMOJI.get(p.role, '')} <b>{p.role}</b>".rstrip())
+            lines.append(f"  {player_link(p)} - {ROLE_EMOJI.get(p.role, '')} <b>{p.role}</b>".rstrip())
 
         lines.extend(["", "Остальные участники:"])
         for p in others:
-            lines.append(f"  {self.public_player_mark(p)} - {ROLE_EMOJI.get(p.role, '')} <b>{p.role}</b>".rstrip())
+            lines.append(f"  {player_link(p)} - {ROLE_EMOJI.get(p.role, '')} <b>{p.role}</b>".rstrip())
 
         if self.suicide_winners:
             lines.extend(["", "Личная победа самоубийцы:"])
             for player in self.players.values():
                 if player.user_id in self.suicide_winners:
-                    lines.append(f"  {self.public_player_mark(player)}")
+                    lines.append(f"  {player_link(player)}")
 
         lines.extend(["", f"Игра длилась: {self.game_duration_text()}"])
         return "\n".join(lines)

@@ -3962,6 +3962,7 @@ async def on_action_callback(callback: CallbackQuery) -> None:
             await callback.message.edit_text(
                 locked_choice_text(room, callback.from_user.id, selected_name, selected_user_id),
                 parse_mode="HTML",
+                reply_markup=None,
             )
             await maybe_finish_phase_early(callback.bot, room)
             persist_room(room)
@@ -3985,6 +3986,7 @@ async def on_action_callback(callback: CallbackQuery) -> None:
             await callback.message.edit_text(
                 locked_choice_text(room, callback.from_user.id, selected_name, selected_user_id),
                 parse_mode="HTML",
+                reply_markup=None,
             )
             await maybe_finish_phase_early(callback.bot, room)
             persist_room(room)
@@ -4077,6 +4079,8 @@ async def on_action_callback(callback: CallbackQuery) -> None:
                 selected_user_id = None
             await callback.message.edit_text(
                 locked_choice_text(room, callback.from_user.id, selected_name, selected_user_id),
+                parse_mode="HTML",
+                reply_markup=None,
             )
             await maybe_finish_phase_early(callback.bot, room)
             persist_room(room)
@@ -4105,6 +4109,7 @@ async def on_action_callback(callback: CallbackQuery) -> None:
             await callback.message.edit_text(
                 locked_choice_text(room, callback.from_user.id, selected_name, selected_user_id),
                 parse_mode="HTML",
+                reply_markup=None,
             )
 
             if voter is not None and target is not None and not is_secret_voting_enabled(room):
@@ -4149,6 +4154,7 @@ async def on_action_callback(callback: CallbackQuery) -> None:
         await callback.answer("Пропуск голосования принят.")
         await callback.message.edit_text(
             build_action_prompt_text(room, callback.from_user.id) + "\n\nТы выбрал пропуск",
+            reply_markup=None,
         )
         if not is_secret_voting_enabled(room):
             await callback.bot.send_message(
@@ -4179,6 +4185,7 @@ async def on_action_callback(callback: CallbackQuery) -> None:
             await callback.message.edit_text(
                 locked_choice_text(room, callback.from_user.id, selected_name, selected_user_id),
                 parse_mode="HTML",
+                reply_markup=None,
             )
             await maybe_finish_phase_early(callback.bot, room)
             persist_room(room)
@@ -4202,6 +4209,7 @@ async def on_action_callback(callback: CallbackQuery) -> None:
             await callback.message.edit_text(
                 locked_choice_text(room, callback.from_user.id, selected_name, selected_user_id),
                 parse_mode="HTML",
+                reply_markup=None,
             )
             await maybe_finish_phase_early(callback.bot, room)
             persist_room(room)
@@ -4225,6 +4233,7 @@ async def on_action_callback(callback: CallbackQuery) -> None:
             await callback.message.edit_text(
                 locked_choice_text(room, callback.from_user.id, selected_name, selected_user_id),
                 parse_mode="HTML",
+                reply_markup=None,
             )
             await maybe_finish_phase_early(callback.bot, room)
             persist_room(room)
@@ -4248,6 +4257,7 @@ async def on_action_callback(callback: CallbackQuery) -> None:
             await callback.message.edit_text(
                 locked_choice_text(room, callback.from_user.id, selected_name, selected_user_id),
                 parse_mode="HTML",
+                reply_markup=None,
             )
             await maybe_finish_phase_early(callback.bot, room)
             persist_room(room)
@@ -4289,6 +4299,7 @@ async def on_noop_callback(callback: CallbackQuery) -> None:
         try:
             await callback.message.edit_text(
                 build_action_prompt_text(room, callback.from_user.id) + "\n\nТы выбрал пропуск",
+                reply_markup=None,
             )
         except Exception:
             pass
