@@ -16,6 +16,9 @@ from mafia_bot.game import (
     DAY_STAGE_DISCUSSION,
     DAY_STAGE_NOMINATION,
     DAY_STAGE_TRIAL,
+    GAME_MODE_CLASSIC,
+    GAME_MODE_INVISIBLE,
+    GAME_MODE_TITLES,
     MAFIA_ROLES,
     MIN_PLAYERS,
     PHASE_DAY,
@@ -39,6 +42,8 @@ from mafia_bot.game import (
     ROLE_SUICIDE,
     GameStorage,
     all_roles_info_text,
+    game_mode_from_settings,
+    invisible_mode_from_settings,
     role_card_text,
 )
 
@@ -154,6 +159,10 @@ SETTINGS_VOTING_MODE_TEXT = (
     "Стоит ли делать голосование закрытым и скрывать имена обвиняемых?\n"
     "При варианте \"Открытое\" будет видно кто за кого голосовал, а при варианте \"Тайное\" - не будет видно."
 )
+SETTINGS_GAME_MODE_TEXT = (
+    "Выберите игровой режим.\n"
+    "В режиме \"Невидимка\" бот включает фиксированную анонимность и блокирует изменение остальных настроек, пока вы не вернётесь в \"Классику\"."
+)
 
 
 def get_phase_lock(chat_id: int) -> asyncio.Lock:
@@ -229,16 +238,20 @@ def is_secret_voting_enabled(room) -> bool:
 def trial_vote_prompt_text(room, candidate) -> str:
     if candidate is None:
         return "Вы точно хотите линчевать обвиняемого?"
-    if is_secret_voting_enabled(room):
+    if is_secret_voting_enabled(room) or invisible_mode_enabled(room):
         return "Вы точно хотите линчевать обвиняемого?"
-    return f"Вы точно хотите линчевать {player_profile_link(candidate)}?"
+    return f"Вы точно хотите линчевать {room_player_mark(room, candidate)}?"
 
 
 def show_targets_enabled(room) -> bool:
+    if invisible_mode_enabled(room):
+        return False
     return bool(room_chat_settings(room).get("misc", {}).get("show_targets", False))
 
 
 def show_roles_enabled(room) -> bool:
+    if invisible_mode_enabled(room):
+        return False
     return bool(room_chat_settings(room).get("misc", {}).get("show_roles", True))
 
 
@@ -269,6 +282,63 @@ def day_vote_skip_enabled(room) -> bool:
 
 def content_protection_enabled(room) -> bool:
     return bool(room_chat_settings(room).get("misc", {}).get("content_protection", False))
+
+
+def invisible_mode_enabled(room_or_settings) -> bool:
+    if isinstance(room_or_settings, dict):
+        return invisible_mode_from_settings(room_or_settings)
+    return invisible_mode_from_settings(room_chat_settings(room_or_settings))
+
+
+def settings_mode_locked_message(settings: dict) -> str:
+    mode_title = GAME_MODE_TITLES.get(game_mode_from_settings(settings), "Неизвестный режим")
+    return (
+        f"Сейчас активен режим «{mode_title}».\n"
+        "Чтобы изменить настройки, переключитесь на режим «Классика»."
+    )
+
+
+def settings_mode_locked(settings: dict) -> bool:
+    return game_mode_from_settings(settings) != GAME_MODE_CLASSIC
+
+
+def apply_game_mode_preset(settings: dict, mode: str) -> dict:
+    normalized = merge_chat_settings(settings)
+    normalized["game_mode"] = mode
+    if mode == GAME_MODE_INVISIBLE:
+        normalized["voting_mode"] = "secret"
+        normalized["misc"]["action_notifications"] = False
+        normalized["misc"]["allow_team_kill"] = False
+        normalized["misc"]["content_protection"] = True
+        normalized["misc"]["show_targets"] = False
+        normalized["misc"]["show_roles"] = False
+        normalized["misc"]["show_killers"] = False
+    return normalized
+
+
+def room_player_mark(room, player, *, clickable: bool = True) -> str:
+    if invisible_mode_enabled(room):
+        return escape(room.anonymous_player_label(player))
+    if clickable:
+        return player_profile_link(player)
+    return escape(player_display_name(player))
+
+
+def room_player_label(room, player) -> str:
+    if invisible_mode_enabled(room):
+        return room.anonymous_player_label(player)
+    return player_display_name(player)
+
+
+def private_settings_main_text(settings: dict) -> str:
+    mode_title = GAME_MODE_TITLES.get(game_mode_from_settings(settings), "Классика")
+    if settings_mode_locked(settings):
+        return (
+            "Какие параметры вы хотите изменить?\n\n"
+            f"Сейчас активен режим «{mode_title}».\n"
+            "Сначала переключитесь на «Классику», чтобы снова менять настройки."
+        )
+    return f"Какие параметры вы хотите изменить?\n\nТекущий режим: {mode_title}."
 
 
 def private_game_send_kwargs(room) -> dict:
@@ -334,6 +404,7 @@ def night_role_announcement_text(room, role_name: str, target=None, *, variant: 
 
 def default_chat_settings() -> dict:
     return {
+        "game_mode": GAME_MODE_CLASSIC,
         "roles": {role: True for role in SETTINGS_ROLE_OPTIONS},
         "timings": {
             "registration": REGISTRATION_SECONDS,
@@ -373,6 +444,10 @@ def merge_chat_settings(raw_settings: dict | None) -> dict:
     settings = default_chat_settings()
     if not isinstance(raw_settings, dict):
         return settings
+
+    raw_game_mode = raw_settings.get("game_mode")
+    if raw_game_mode in GAME_MODE_TITLES:
+        settings["game_mode"] = raw_game_mode
 
     raw_roles = raw_settings.get("roles", {})
     if isinstance(raw_roles, dict):
@@ -436,6 +511,15 @@ def merge_chat_settings(raw_settings: dict | None) -> dict:
             settings["misc"]["show_roles"] = bool(raw_misc["show_roles"])
         if "show_killers" in raw_misc:
             settings["misc"]["show_killers"] = bool(raw_misc["show_killers"])
+
+    if settings["game_mode"] == GAME_MODE_INVISIBLE:
+        settings["voting_mode"] = "secret"
+        settings["misc"]["action_notifications"] = False
+        settings["misc"]["allow_team_kill"] = False
+        settings["misc"]["content_protection"] = True
+        settings["misc"]["show_targets"] = False
+        settings["misc"]["show_roles"] = False
+        settings["misc"]["show_killers"] = False
 
     return settings
 
@@ -687,7 +771,7 @@ def locked_choice_text(room, actor_user_id: int, selected_name: str, selected_us
     prompt = build_action_prompt_text(room, actor_user_id)
     safe_name = escape(selected_name)
     selected_mark = safe_name
-    if selected_user_id is not None:
+    if selected_user_id is not None and not invisible_mode_enabled(room):
         selected_mark = f"<a href=\"tg://user?id={selected_user_id}\">{safe_name}</a>"
     return f"{prompt}\n\nТы выбрал {selected_mark}"
 
@@ -1523,7 +1607,14 @@ def registration_text(room) -> str:
         lines.append("Итого <b>0</b> чел.")
         return "\n".join(lines)
 
-    joined_names = ", ".join(player_profile_link(player) for player in room.players.values())
+    if invisible_mode_enabled(room):
+        joined_lines = [
+            f"{index}. {room.anonymous_player_label(player)}"
+            for index, player in enumerate(room.players.values(), start=1)
+        ]
+        joined_names = "\n".join(joined_lines)
+    else:
+        joined_names = ", ".join(player_profile_link(player) for player in room.players.values())
     lines.append("Зарегистрировались::")
     lines.append(joined_names)
     lines.append("")
@@ -1719,14 +1810,33 @@ def private_role_details_text(role: str) -> str:
     )
 
 
-def private_settings_main_keyboard(chat_id: int) -> InlineKeyboardMarkup:
+def private_settings_main_keyboard(chat_id: int, settings: dict) -> InlineKeyboardMarkup:
+    locked = settings_mode_locked(settings)
+
+    def button(text: str, action: str) -> InlineKeyboardButton:
+        if locked and action != "game_mode":
+            return InlineKeyboardButton(text=f"🔒 {text}", callback_data=settings_callback_data(chat_id, "mode_locked"))
+        return InlineKeyboardButton(text=text, callback_data=settings_callback_data(chat_id, action))
+
     return InlineKeyboardMarkup(
         inline_keyboard=[
-            [InlineKeyboardButton(text="🎭 Роли", callback_data=settings_callback_data(chat_id, "roles"))],
-            [InlineKeyboardButton(text="🕐 Тайминги", callback_data=settings_callback_data(chat_id, "timings"))],
-            [InlineKeyboardButton(text="🙊 Молчанка", callback_data=settings_callback_data(chat_id, "mute"))],
-            [InlineKeyboardButton(text="🛠 Разное", callback_data=settings_callback_data(chat_id, "misc"))],
+            [InlineKeyboardButton(text=f"🎮 Режим игры: {GAME_MODE_TITLES.get(game_mode_from_settings(settings), 'Классика')}", callback_data=settings_callback_data(chat_id, "game_mode"))],
+            [button("🎭 Роли", "roles")],
+            [button("🕐 Тайминги", "timings")],
+            [button("🙊 Молчанка", "mute")],
+            [button("🛠 Разное", "misc")],
             [InlineKeyboardButton(text="⬅️ Назад", callback_data=settings_callback_data(chat_id, "close"))],
+        ]
+    )
+
+
+def private_settings_game_mode_keyboard(chat_id: int, settings: dict) -> InlineKeyboardMarkup:
+    current = game_mode_from_settings(settings)
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text=f"Классика {selected_square(current == GAME_MODE_CLASSIC)}", callback_data=settings_callback_data(chat_id, "game_mode_set", GAME_MODE_CLASSIC))],
+            [InlineKeyboardButton(text=f"Невидимка {selected_square(current == GAME_MODE_INVISIBLE)}", callback_data=settings_callback_data(chat_id, "game_mode_set", GAME_MODE_INVISIBLE))],
+            [InlineKeyboardButton(text="⬅️ Назад", callback_data=settings_callback_data(chat_id, "main"))],
         ]
     )
 
@@ -2012,7 +2122,7 @@ def build_action_keyboard(room, actor_user_id: int) -> InlineKeyboardMarkup | No
         return f"✅ {name}" if selected_target_id == user_id else name
 
     def target_label(target, teammate_mark: str = "") -> str:
-        base_name = player_display_name(target)
+        base_name = room_player_label(room, target)
         extra_mark = ""
         if actor.role == ROLE_COMMISSAR:
             known_role = room.commissar_known_roles.get(target.user_id)
@@ -2240,6 +2350,17 @@ def night_status_text(room) -> str:
         return f"{secs} сек."
 
     lines = ["<b>Живые игроки:</b>"]
+    if invisible_mode_enabled(room):
+        for player in sorted(alive, key=lambda p: seat_positions.get(p.user_id, 10**9)):
+            seat_no = seat_positions.get(player.user_id)
+            if seat_no is None:
+                lines.append(room.anonymous_player_label(player))
+            else:
+                lines.append(f"{seat_no}. {room.anonymous_player_label(player)}")
+
+        lines.append(f"\n<b>Спать осталось {format_sleep_left(int(room_chat_settings(room)['timings']['night']))}</b>")
+        return "\n".join(lines)
+
     for player in sorted(alive, key=lambda p: seat_positions.get(p.user_id, 10**9)):
         seat_no = seat_positions.get(player.user_id)
         raw_name = (player.full_name or "").strip()
@@ -2308,9 +2429,10 @@ async def push_phase_action_menus(bot: Bot, room) -> None:
             )
             track_action_menu_message(room.chat_id, player.user_id, sent.message_id)
         except Exception:
+            failure_mark = "одному из игроков" if invisible_mode_enabled(room) else player_profile_link(player)
             await bot.send_message(
                 room.chat_id,
-                f"Не смог отправить меню хода игроку {player_profile_link(player)}."
+                f"Не смог отправить меню хода игроку {failure_mark}."
                 " Пусть напишет боту /start в личке.",
                 parse_mode="HTML",
             )
@@ -2354,6 +2476,8 @@ async def push_trial_vote_menus(bot: Bot, room, candidate) -> None:
 
 
 async def send_mafia_private_update(room, bot, text: str) -> None:
+    if invisible_mode_enabled(room):
+        return
     for player in room.alive_players():
         if player.role not in {ROLE_DON, ROLE_MAFIA}:
             continue
@@ -2376,8 +2500,18 @@ async def announce_don_transfer(room, bot: Bot, don_successor_id: int | None) ->
     if new_don is None:
         return
 
-    don_name = player_profile_link(new_don)
-    await bot.send_message(room.chat_id, "<b>🤵🏼 Мафия</b> унаследовал роль <b>🤵🏻 Дон</b>")
+    don_name = room_player_mark(room, new_don)
+    if not invisible_mode_enabled(room):
+        await bot.send_message(room.chat_id, "<b>🤵🏼 Мафия</b> унаследовал роль <b>🤵🏻 Дон</b>", parse_mode="HTML")
+    else:
+        try:
+            await bot.send_message(
+                don_successor_id,
+                "Теперь ты 🤵🏻 Дон",
+                **private_game_send_kwargs(room),
+            )
+        except Exception:
+            pass
     await send_mafia_private_update(
         room,
         bot,
@@ -2389,7 +2523,8 @@ async def announce_commissar_transfer(room, bot: Bot, commissar_successor_id: in
     if commissar_successor_id is None:
         return
 
-    await bot.send_message(room.chat_id, "👮🏼‍♂️ Сержант унаследовал роль 🕵️‍ Комиссар Каттани")
+    if not invisible_mode_enabled(room):
+        await bot.send_message(room.chat_id, "👮🏼‍♂️ Сержант унаследовал роль 🕵️‍ Комиссар Каттани")
     try:
         await bot.send_message(
             commissar_successor_id,
@@ -2446,7 +2581,7 @@ def sergeant_commissar_check_text(room, target_user_id: int, result_role: str) -
     if checked_player is None:
         checked_mark = f"Игрок {target_user_id}"
     else:
-        checked_mark = player_profile_link(checked_player)
+        checked_mark = room_player_mark(room, checked_player)
     return f"🕵️‍ Комиссар Каттани проверил {checked_mark}. Он - {role_mark_text(result_role)}"
 
 
@@ -2530,7 +2665,7 @@ async def process_night_end(bot: Bot, chat_id: int, timer_reason: str | None = N
         if lucky_triggered:
             await bot.send_message(chat_id, "☝️ Кому-то из игроков повезло")
 
-        if mafia_alive_tonight and mafia_target_tonight is None:
+        if mafia_alive_tonight and mafia_target_tonight is None and not invisible_mode_enabled(room):
             await bot.send_message(chat_id, "🚷 🤵🏻 Дон сегодня отдыхает")
 
         await send_phase_media(bot, chat_id, room.day_media_caption(), DAY_IMAGE_PATH)
@@ -2540,8 +2675,11 @@ async def process_night_end(bot: Bot, chat_id: int, timer_reason: str | None = N
             show_roles = show_roles_enabled(room)
             for dead in eliminated:
                 sources = kill_sources.get(dead.user_id, [])
+                if invisible_mode_enabled(room):
+                    await bot.send_message(chat_id, "Один из игроков выбыл.")
+                    continue
                 killer_text = format_killer_sources_text(sources) if show_killers else ""
-                dead_mark = player_profile_link(dead)
+                dead_mark = room_player_mark(room, dead)
                 if show_roles:
                     role_text = role_mark_text(dead.role)
                     text = f"Сегодня был жестоко убит {role_text} {dead_mark}"
@@ -2566,13 +2704,16 @@ async def process_night_end(bot: Bot, chat_id: int, timer_reason: str | None = N
                     )
                 except Exception:
                     pass
-                dead_mark = player_profile_link(dead)
+                dead_mark = room_player_mark(room, dead)
+                public_prefix = (
+                    "Кто-то из жителей слышал крик перед смертью:\n"
+                    if invisible_mode_enabled(room)
+                    else f"Кто-то из жителей слышал, как {dead_mark} кричал перед смертью:\n"
+                )
                 await safe_send_message(
                     bot,
                     chat_id,
-                    "Кто-то из жителей слышал, как "
-                    f"{dead_mark} кричал перед смертью:\n"
-                    "<b>Я больше не бу-у-у-у-ду спать во время игры-ы-ы-ы-ы-ы-!</b>",
+                    f"{public_prefix}<b>Я больше не бу-у-у-у-ду спать во время игры-ы-ы-ы-ы-ы-!</b>",
                     parse_mode="HTML",
                 )
         else:
@@ -2756,8 +2897,8 @@ async def process_day_end(bot: Bot, chat_id: int, timer_reason: str | None = Non
 
             if eliminated:
                 first = eliminated[0]
-                first_mark = player_profile_link(first)
-                verdict_target = "обвиняемого" if is_secret_voting_enabled(room) else first_mark
+                first_mark = room_player_mark(room, first)
+                verdict_target = "обвиняемого" if is_secret_voting_enabled(room) or invisible_mode_enabled(room) else first_mark
                 reveal_roles = show_roles_enabled(room)
                 await safe_send_message(
                     bot,
@@ -2789,12 +2930,15 @@ async def process_day_end(bot: Bot, chat_id: int, timer_reason: str | None = Non
                     await safe_send_message(bot, chat_id, "💀 <b>Самоубийца</b> выполнил личную цель победы.")
                 if first.role == "Камикадзе" and len(eliminated) > 1:
                     second = eliminated[1]
-                    second_mark = player_profile_link(second)
+                    second_mark = room_player_mark(room, second)
                     if reveal_roles:
                         second_role = role_mark_text(second.role)
                         await safe_send_message(bot, chat_id, f"💣 Камикадзе забрал с собой {second_mark} ({second_role}).", parse_mode="HTML")
                     else:
-                        await safe_send_message(bot, chat_id, f"💣 Камикадзе забрал с собой {second_mark}.", parse_mode="HTML")
+                        if invisible_mode_enabled(room):
+                            await safe_send_message(bot, chat_id, "💣 Камикадзе забрал с собой еще одного игрока.")
+                        else:
+                            await safe_send_message(bot, chat_id, f"💣 Камикадзе забрал с собой {second_mark}.", parse_mode="HTML")
             else:
                 await safe_send_message(
                     bot,
@@ -2971,6 +3115,8 @@ async def maybe_finish_phase_early(bot: Bot, room) -> None:
 
 
 def mafia_allies_text(room) -> str:
+    if invisible_mode_enabled(room):
+        return ""
     allies = [player for player in room.players.values() if player.role in {ROLE_DON, ROLE_MAFIA}]
     if not allies:
         return ""
@@ -2983,6 +3129,8 @@ def mafia_allies_text(room) -> str:
 
 
 def city_power_allies_text(room, role: str) -> str:
+    if invisible_mode_enabled(room):
+        return ""
     lines: list[str] = []
     if role == ROLE_SERGEANT:
         commissar = next((player for player in room.players.values() if player.role == ROLE_COMMISSAR), None)
@@ -3187,8 +3335,8 @@ async def cmd_settings(message: Message) -> None:
     try:
         await message.bot.send_message(
             message.from_user.id,
-            "Какие параметры вы хотите изменить?",
-            reply_markup=private_settings_main_keyboard(message.chat.id),
+            private_settings_main_text(settings),
+            reply_markup=private_settings_main_keyboard(message.chat.id, settings),
         )
     except Exception:
         await message.answer("Не смог отправить настройки в ЛС. Напиши боту /start в личку и попробуй снова.")
@@ -3336,8 +3484,11 @@ async def cmd_leave(message: Message) -> None:
         persist_room(room)
 
         leaver_mark = player_profile_link(player)
-        leave_text = f"{leaver_mark} не выдержал гнетущей атмосферы этого города и повесился."
-        if show_roles_enabled(room):
+        if invisible_mode_enabled(room):
+            leave_text = "Один из игроков не выдержал гнетущей атмосферы этого города и выбыл."
+        else:
+            leave_text = f"{leaver_mark} не выдержал гнетущей атмосферы этого города и повесился."
+        if show_roles_enabled(room) and not invisible_mode_enabled(room):
             leave_text += f"\nОн был {role_mark_text(player.role)}"
         await message.answer(leave_text, parse_mode="HTML")
 
@@ -3806,6 +3957,8 @@ async def on_action_callback(callback: CallbackQuery) -> None:
     async def announce_night_role_once(role_name: str, target=None, *, variant: str = "default") -> None:
         if room.phase != "night":
             return
+        if invisible_mode_enabled(room):
+            return
         if not room.mark_night_role_announced(role_name):
             return
         announcement_text = night_role_announcement_text(room, role_name, target, variant=variant)
@@ -3847,7 +4000,7 @@ async def on_action_callback(callback: CallbackQuery) -> None:
                     )
                     room.mafia_target_announced = True
             if target is not None:
-                selected_name = player_display_name(target)
+                selected_name = room_player_label(room, target)
                 selected_user_id = target.user_id
             else:
                 selected_name = "цель"
@@ -3870,7 +4023,7 @@ async def on_action_callback(callback: CallbackQuery) -> None:
             target = room.get_player(target_id)
             await announce_night_role_once(actor.role, target)
             if target is not None:
-                selected_name = player_display_name(target)
+                selected_name = room_player_label(room, target)
                 selected_user_id = target.user_id
             else:
                 selected_name = "цель"
@@ -3902,7 +4055,8 @@ async def on_action_callback(callback: CallbackQuery) -> None:
         await callback.answer(info, show_alert=not ok)
         if ok:
             if mode == "shoot":
-                await callback.bot.send_message(room.chat_id, "🕵️‍ Комиссар Каттани уже зарядил свой пистолет...")
+                if not invisible_mode_enabled(room):
+                    await callback.bot.send_message(room.chat_id, "🕵️‍ Комиссар Каттани уже зарядил свой пистолет...")
             await refresh_private_action_message(callback, room, callback.from_user.id)
             persist_room(room)
         return
@@ -3917,7 +4071,7 @@ async def on_action_callback(callback: CallbackQuery) -> None:
             target = room.get_player(target_id)
             await announce_night_role_once(actor.role, target)
             if target is not None:
-                selected_name = player_display_name(target)
+                selected_name = room_player_label(room, target)
                 selected_user_id = target.user_id
             else:
                 selected_name = "цель"
@@ -3940,7 +4094,7 @@ async def on_action_callback(callback: CallbackQuery) -> None:
             target = room.get_player(target_id)
             await announce_night_role_once(actor.role, target, variant="shoot")
             if target is not None:
-                selected_name = player_display_name(target)
+                selected_name = room_player_label(room, target)
                 selected_user_id = target.user_id
             else:
                 selected_name = "цель"
@@ -3963,7 +4117,7 @@ async def on_action_callback(callback: CallbackQuery) -> None:
             target = room.get_player(target_id)
             await announce_night_role_once(actor.role, target)
             if target is not None:
-                selected_name = player_display_name(target)
+                selected_name = room_player_label(room, target)
                 selected_user_id = target.user_id
             else:
                 selected_name = "цель"
@@ -3989,7 +4143,7 @@ async def on_action_callback(callback: CallbackQuery) -> None:
             target = room.get_player(target_id)
             voter = room.get_player(callback.from_user.id)
             if target is not None:
-                selected_name = player_display_name(target)
+                selected_name = room_player_label(room, target)
                 selected_user_id = target.user_id
             else:
                 selected_name = "кандидата"
@@ -4064,7 +4218,7 @@ async def on_action_callback(callback: CallbackQuery) -> None:
             target = room.get_player(target_id)
             await announce_night_role_once(actor.role, target)
             if target is not None:
-                selected_name = player_display_name(target)
+                selected_name = room_player_label(room, target)
                 selected_user_id = target.user_id
             else:
                 selected_name = "цель"
@@ -4087,7 +4241,7 @@ async def on_action_callback(callback: CallbackQuery) -> None:
             target = room.get_player(target_id)
             await announce_night_role_once(actor.role, target)
             if target is not None:
-                selected_name = player_display_name(target)
+                selected_name = room_player_label(room, target)
                 selected_user_id = target.user_id
             else:
                 selected_name = "цель"
@@ -4110,7 +4264,7 @@ async def on_action_callback(callback: CallbackQuery) -> None:
             target = room.get_player(target_id)
             await announce_night_role_once(actor.role, target)
             if target is not None:
-                selected_name = player_display_name(target)
+                selected_name = room_player_label(room, target)
                 selected_user_id = target.user_id
             else:
                 selected_name = "цель"
@@ -4133,7 +4287,7 @@ async def on_action_callback(callback: CallbackQuery) -> None:
             target = room.get_player(target_id)
             await announce_night_role_once(actor.role, target)
             if target is not None:
-                selected_name = player_display_name(target)
+                selected_name = room_player_label(room, target)
                 selected_user_id = target.user_id
             else:
                 selected_name = "цель"
@@ -4352,8 +4506,12 @@ async def on_private_settings_callback(callback: CallbackQuery) -> None:
     action = parts[2]
     settings = load_chat_settings(chat_id)
 
+    if action == "mode_locked":
+        await safe_answer(settings_mode_locked_message(settings), show_alert=True)
+        return
+
     if action == "main":
-        await show_settings_screen("Какие параметры вы хотите изменить?", private_settings_main_keyboard(chat_id))
+        await show_settings_screen(private_settings_main_text(settings), private_settings_main_keyboard(chat_id, settings))
         await safe_answer()
         return
 
@@ -4364,6 +4522,26 @@ async def on_private_settings_callback(callback: CallbackQuery) -> None:
             private_main_menu_keyboard(),
         )
         await safe_answer()
+        return
+
+    if action == "game_mode":
+        await show_settings_screen(SETTINGS_GAME_MODE_TEXT, private_settings_game_mode_keyboard(chat_id, settings))
+        await safe_answer()
+        return
+
+    if action == "game_mode_set" and len(parts) == 4:
+        value = parts[3]
+        if value not in GAME_MODE_TITLES:
+            await safe_answer("Неизвестный режим.", show_alert=True)
+            return
+        settings = apply_game_mode_preset(settings, value)
+        settings = save_chat_settings(chat_id, settings)
+        await show_settings_screen(SETTINGS_GAME_MODE_TEXT, private_settings_game_mode_keyboard(chat_id, settings))
+        await safe_answer("Сохранено")
+        return
+
+    if settings_mode_locked(settings):
+        await safe_answer(settings_mode_locked_message(settings), show_alert=True)
         return
 
     if action == "roles":
@@ -4575,9 +4753,15 @@ async def on_private_text(message: Message) -> None:
         player_mark = f"<a href=\"tg://user?id={message.from_user.id}\">{safe_name}</a>"
         safe_payload = escape(payload)
         await message.answer("Предсмертное сообщение принято.", **private_game_send_kwargs(last_word_room))
+        public_prefix = (
+            "Кто-то из жителей слышал чей-то крик перед смертью:\n"
+            if invisible_mode_enabled(last_word_room)
+            else f"Кто-то из жителей слышал, как {player_mark} кричал перед смертью:\n"
+        )
         await message.bot.send_message(
             last_word_room.chat_id,
-            f"Кто-то из жителей слышал, как {player_mark} кричал перед смертью:\n<b>{safe_payload}</b>",
+            f"{public_prefix}<b>{safe_payload}</b>",
+            parse_mode="HTML",
         )
         return
 
@@ -4601,7 +4785,7 @@ async def on_private_text(message: Message) -> None:
     if teammate_roles is None:
         return
 
-    relay_author = player_profile_link(actor)
+    relay_author = room_player_mark(room, actor)
     relay_text = f"{relay_author}:\n{text}"
     for teammate in room.alive_players():
         if teammate.role not in teammate_roles:

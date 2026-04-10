@@ -10,6 +10,9 @@ PHASE_NIGHT = "night"
 PHASE_DAY = "day"
 PHASE_FINISHED = "finished"
 
+GAME_MODE_CLASSIC = "classic"
+GAME_MODE_INVISIBLE = "invisible"
+
 DAY_STAGE_DISCUSSION = "discussion"
 DAY_STAGE_NOMINATION = "nomination"
 DAY_STAGE_TRIAL = "trial"
@@ -104,6 +107,22 @@ ROLE_ACTION_RULES = {
     ROLE_KAMIKAZE: "Пассивно: если его казнят днем, случайно забирает с собой еще одного игрока.",
     ROLE_CITIZEN: "Ход: день. Действие: участвует в обсуждении и голосованиях.",
 }
+
+GAME_MODE_TITLES = {
+    GAME_MODE_CLASSIC: "Классика",
+    GAME_MODE_INVISIBLE: "Невидимка",
+}
+
+
+def game_mode_from_settings(settings: dict | None) -> str:
+    raw_mode = (settings or {}).get("game_mode")
+    if raw_mode in GAME_MODE_TITLES:
+        return raw_mode
+    return GAME_MODE_CLASSIC
+
+
+def invisible_mode_from_settings(settings: dict | None) -> bool:
+    return game_mode_from_settings(settings) == GAME_MODE_INVISIBLE
 
 
 def role_card_text(role: str, chat_title: str) -> str:
@@ -258,10 +277,24 @@ class GameRoom:
     host_id: int
     settings: dict = field(default_factory=dict)
 
+    def seat_number(self, user_id: int) -> int | None:
+        for index, player in enumerate(self.players.values(), start=1):
+            if player.user_id == user_id:
+                return index
+        return None
+
+    def anonymous_player_label(self, player: Player) -> str:
+        return "Невидимка"
+
+    def public_player_mark(self, player: Player) -> str:
+        if invisible_mode_from_settings(self.settings):
+            return escape(self.anonymous_player_label(player))
+        return player_link(player)
+
     def commissar_check_result_text(self, checked_player) -> str:
         role = checked_player.role
         emoji = ROLE_EMOJI.get(role, "")
-        name_link = player_link(checked_player)
+        name_link = self.public_player_mark(checked_player)
         return f"{name_link} - {emoji} <b>{role}</b>"
     chat_title: str = ""
     players: dict[int, Player] = field(default_factory=dict)
@@ -548,7 +581,7 @@ class GameRoom:
         new_don = min(candidates, key=lambda p: p.user_id)
         new_don.role = ROLE_DON
         self.last_don_successor_id = new_don.user_id
-        return f"После {reason} новым Доном становится {player_link(new_don)}.", new_don.user_id
+        return f"После {reason} новым Доном становится {self.public_player_mark(new_don)}.", new_don.user_id
 
     def transfer_commissar_if_needed(self) -> tuple[str, int] | None:
         alive_commissar = next((p for p in self.alive_players() if p.role == ROLE_COMMISSAR), None)
@@ -1342,7 +1375,7 @@ class GameRoom:
                     self.set_pending_sergeant_check(checked.user_id, ROLE_CITIZEN)
                     self.add_night_report_line(
                         commissar.user_id,
-                        f"<a href=\"tg://user?id={checked.user_id}\">{escape((checked.full_name or '').strip() or f'Игрок {checked.user_id}')}</a> - 👨🏼 <b>{ROLE_CITIZEN}</b>",
+                        f"{self.public_player_mark(checked)} - 👨🏼 <b>{ROLE_CITIZEN}</b>",
                     )
                     checked = None
                 elif notify_actions:
@@ -1357,7 +1390,7 @@ class GameRoom:
                         self.set_pending_sergeant_check(checked.user_id, ROLE_CITIZEN)
                         self.add_night_report_line(
                             commissar.user_id,
-                            f"<a href=\"tg://user?id={checked.user_id}\">{escape((checked.full_name or '').strip() or f'Игрок {checked.user_id}')}</a> - 👨🏼 <b>{ROLE_CITIZEN}</b>",
+                            f"{self.public_player_mark(checked)} - 👨🏼 <b>{ROLE_CITIZEN}</b>",
                         )
                     else:
                         self.remember_commissar_check(checked.user_id, checked.role)
@@ -1483,7 +1516,7 @@ class GameRoom:
         if bum is not None and self.bum_target_id is not None:
             observed = self.get_player(self.bum_target_id)
             if observed is not None:
-                observed_name = player_link(observed)
+                observed_name = self.public_player_mark(observed)
                 visitors: list[Player] = []
                 seen_ids: set[int] = set()
 
@@ -1519,7 +1552,7 @@ class GameRoom:
                         add_visitor(don.user_id)
 
                 if visitors:
-                    visitor_names = ", ".join(player_link(player) for player in visitors)
+                    visitor_names = ", ".join(self.public_player_mark(player) for player in visitors)
                     self.add_night_report_line(
                         bum.user_id,
                         f"Ночью ты пришёл за бутылкой к {observed_name} и увидел там {visitor_names}",
@@ -1839,6 +1872,12 @@ class GameRoom:
         if not alive:
             return "Живых игроков нет."
 
+        if invisible_mode_from_settings(self.settings):
+            lines = ["<b>Живые игроки:</b>"]
+            for index, player in enumerate(alive, start=1):
+                lines.append(f"{index}. {self.anonymous_player_label(player)}")
+            return "\n".join(lines)
+
         seat_positions = {p.user_id: i for i, p in enumerate(self.players.values(), start=1)}
         lines = ["<b>Живые игроки:</b>"]
         for player in sorted(alive, key=lambda p: seat_positions.get(p.user_id, 10**9)):
@@ -1853,6 +1892,9 @@ class GameRoom:
         return "\n".join(lines)
 
     def alive_role_hints_text(self) -> str:
+        if invisible_mode_from_settings(self.settings):
+            return ""
+
         counts: dict[str, int] = {}
         for player in self.alive_players():
             counts[player.role] = counts.get(player.role, 0) + 1
@@ -1897,17 +1939,17 @@ class GameRoom:
 
         lines = ["Игра окончена!", f"Победили: {winner}", "", "Победители:"]
         for p in winners:
-            lines.append(f"  {player_link(p)} - {ROLE_EMOJI.get(p.role, '')} <b>{p.role}</b>".rstrip())
+            lines.append(f"  {self.public_player_mark(p)} - {ROLE_EMOJI.get(p.role, '')} <b>{p.role}</b>".rstrip())
 
         lines.extend(["", "Остальные участники:"])
         for p in others:
-            lines.append(f"  {player_link(p)} - {ROLE_EMOJI.get(p.role, '')} <b>{p.role}</b>".rstrip())
+            lines.append(f"  {self.public_player_mark(p)} - {ROLE_EMOJI.get(p.role, '')} <b>{p.role}</b>".rstrip())
 
         if self.suicide_winners:
             lines.extend(["", "Личная победа самоубийцы:"])
             for player in self.players.values():
                 if player.user_id in self.suicide_winners:
-                    lines.append(f"  {player_link(player)}")
+                    lines.append(f"  {self.public_player_mark(player)}")
 
         lines.extend(["", f"Игра длилась: {self.game_duration_text()}"])
         return "\n".join(lines)
@@ -1967,7 +2009,10 @@ class GameRoom:
             f"Продлений: {self.registration_extensions}",
         ]
         for i, player in enumerate(self.players.values(), start=1):
-            lines.append(f"{i}. {player_link(player)}")
+            if invisible_mode_from_settings(self.settings):
+                lines.append(f"{i}. {self.anonymous_player_label(player)}")
+            else:
+                lines.append(f"{i}. {player_link(player)}")
         return "\n".join(lines)
 
 
