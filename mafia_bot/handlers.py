@@ -3237,10 +3237,13 @@ async def cmd_start(message: Message, command: CommandObject) -> None:
                 f"<b>С возвращением, {nickname}!</b>\n\n"
                 "Выбери нужный раздел кнопками ниже."
             )
-        await message.answer(
-            text,
-            reply_markup=keyboard,
-        )
+        try:
+            await message.answer(
+                text,
+                reply_markup=keyboard,
+            )
+        except TelegramForbiddenError:
+            return
         return
 
 
