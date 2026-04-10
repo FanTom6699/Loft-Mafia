@@ -1892,9 +1892,6 @@ class GameRoom:
         return "\n".join(lines)
 
     def alive_role_hints_text(self) -> str:
-        if invisible_mode_from_settings(self.settings):
-            return ""
-
         counts: dict[str, int] = {}
         for player in self.alive_players():
             counts[player.role] = counts.get(player.role, 0) + 1
