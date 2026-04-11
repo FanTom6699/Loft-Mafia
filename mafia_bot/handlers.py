@@ -317,6 +317,12 @@ def content_protection_enabled(room) -> bool:
     return bool(room_chat_settings(room).get("misc", {}).get("content_protection", False))
 
 
+def buffs_enabled(room_or_settings) -> bool:
+    if isinstance(room_or_settings, dict):
+        return bool(room_or_settings.get("misc", {}).get("buffs_enabled", False))
+    return bool(room_chat_settings(room_or_settings).get("misc", {}).get("buffs_enabled", False))
+
+
 def invisible_mode_enabled(room_or_settings) -> bool:
     if isinstance(room_or_settings, dict):
         return invisible_mode_from_settings(room_or_settings)
@@ -1336,6 +1342,8 @@ def format_buff_details_text(key: str, stats: dict | None) -> str:
 def prime_room_documents(room) -> None:
     room.documented_user_ids.clear()
     room.spent_documents_user_ids.clear()
+    if not buffs_enabled(room):
+        return
     for player in room.players.values():
         stats = repo.get_player_stats(player.user_id)
         if stats is None:
@@ -1347,6 +1355,8 @@ def prime_room_documents(room) -> None:
 def prime_room_shields(room) -> None:
     room.shielded_user_ids.clear()
     room.spent_shield_user_ids.clear()
+    if not buffs_enabled(room):
+        return
     for player in room.players.values():
         stats = repo.get_player_stats(player.user_id)
         if stats is None:
