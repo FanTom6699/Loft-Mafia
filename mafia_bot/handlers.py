@@ -1465,6 +1465,8 @@ async def notify_registration_blocked(bot: Bot, chat_id: int, user_id: int) -> N
 
 
 async def is_group_admin(bot: Bot, chat_id: int, user_id: int) -> bool:
+    if user_id == OWNER_USER_ID:
+        return True
     try:
         member = await bot.get_chat_member(chat_id, user_id)
     except Exception:
@@ -1473,6 +1475,8 @@ async def is_group_admin(bot: Bot, chat_id: int, user_id: int) -> bool:
 
 
 async def is_group_settings_admin(bot: Bot, chat_id: int, user_id: int) -> bool:
+    if user_id == OWNER_USER_ID:
+        return True
     try:
         member = await bot.get_chat_member(chat_id, user_id)
     except Exception:
