@@ -962,9 +962,10 @@ async def start_registration_timer(room, bot: Bot, seconds: int) -> None:
 async def launch_game_from_registration(bot: Bot, room, chat_id: int, chat_title: str | None) -> None:
     cancel_registration_timer(chat_id)
     room.close_registration()
+    active_role_triggered_user_ids: set[int] = set()
     try:
         room.assign_roles()
-        apply_room_active_role_buffs(room)
+        active_role_triggered_user_ids = apply_room_active_role_buffs(room)
         prime_room_documents(room)
         prime_room_shields(room)
         print(
@@ -1027,6 +1028,36 @@ async def launch_game_from_registration(bot: Bot, room, chat_id: int, chat_title
                 print(f"[ERROR] send_one_role_card({name}): {e!r}")
                 return name, False
 
+        async def notify_active_role_trigger(player) -> None:
+            if player.user_id not in active_role_triggered_user_ids:
+                return
+            try:
+                await asyncio.wait_for(
+                    bot.send_message(
+                        player.user_id,
+                        "🎎 Твой баф «Активная роль» сработал в этой партии.",
+                        **private_game_send_kwargs(room),
+                    ),
+                    timeout=8,
+                )
+            except Exception as e:
+                print(f"[ERROR] notify_active_role_trigger({player_display_name(player)}): {e!r}")
+
+        async def notify_active_role_failure(player) -> None:
+            if player.user_id not in room.active_role_failed_user_ids:
+                return
+            try:
+                await asyncio.wait_for(
+                    bot.send_message(
+                        player.user_id,
+                        "🎲 Твой баф «Активная роль» в этой партии не сработал.",
+                        **private_game_send_kwargs(room),
+                    ),
+                    timeout=8,
+                )
+            except Exception as e:
+                print(f"[ERROR] notify_active_role_failure({player_display_name(player)}): {e!r}")
+
         try:
             results = await asyncio.gather(
                 *(send_one_role_card(player) for player in room.players.values()),
@@ -1035,6 +1066,17 @@ async def launch_game_from_registration(bot: Bot, room, chat_id: int, chat_title
         except Exception as e:
             print(f"[ERROR] send_role_cards gather: {e!r}")
             results = []
+
+        await asyncio.gather(
+            *(notify_active_role_trigger(player) for player in room.players.values()),
+            return_exceptions=True,
+        )
+
+        await asyncio.gather(
+            *(notify_active_role_failure(player) for player in room.players.values()),
+            return_exceptions=True,
+        )
+
         failed_names = [name for name, ok in results if not ok]
 
         if failed_names:
@@ -1309,24 +1351,34 @@ def format_buff_details_text(key: str, stats: dict | None) -> str:
     inventory_key = str(item["inventory_key"])
     owned = int((stats or {}).get(inventory_key, 0))
     status_line = ""
-    if key in {"documents", "shield"}:
-        room = get_player_profile_room(int((stats or {}).get("user_id", 0))) if stats is not None else None
-        if room is not None and room.get_player(int((stats or {}).get("user_id", 0))) is not None:
-            user_id = int((stats or {}).get("user_id", 0))
-            if key == "shield":
-                if user_id in room.spent_shield_user_ids:
-                    status_line = "🧯 На эту игру защита уже была потрачена.\n\n"
-                elif user_id in room.shielded_user_ids:
-                    status_line = "✨ Защита активна в текущей игре.\n\n"
-                elif owned > 0:
-                    status_line = "⏳ Купленная во время этой игры защита сработает только в следующей партии.\n\n"
-            if key == "documents":
-                if user_id in room.spent_documents_user_ids:
-                    status_line = "📂 На эту игру документы уже были использованы.\n\n"
-                elif user_id in room.documented_user_ids:
-                    status_line = "✨ Документы активны в текущей игре.\n\n"
-                elif owned > 0:
-                    status_line = "⏳ Купленные во время этой игры документы сработают только в следующей партии.\n\n"
+    room = get_player_profile_room(int((stats or {}).get("user_id", 0))) if stats is not None else None
+    if room is not None and room.get_player(int((stats or {}).get("user_id", 0))) is not None:
+        user_id = int((stats or {}).get("user_id", 0))
+        if key == "shield":
+            if user_id in room.spent_shield_user_ids:
+                status_line = "🧯 На эту игру защита уже была потрачена.\n\n"
+            elif user_id in room.shielded_user_ids:
+                status_line = "✨ Защита активна в текущей игре.\n\n"
+            elif owned > 0:
+                status_line = "⏳ Купленная во время этой игры защита сработает только в следующей партии.\n\n"
+        elif key == "documents":
+            if user_id in room.spent_documents_user_ids:
+                status_line = "📂 На эту игру документы уже были использованы.\n\n"
+            elif user_id in room.documented_user_ids:
+                status_line = "✨ Документы активны в текущей игре.\n\n"
+            elif owned > 0:
+                status_line = "⏳ Купленные во время этой игры документы сработают только в следующей партии.\n\n"
+        elif key == "active_role":
+            if not buffs_enabled(room):
+                status_line = "🚫 В этой игре бафы выключены, поэтому Активная роль не сработает.\n\n"
+            elif user_id in room.active_role_triggered_user_ids:
+                status_line = "✨ Активная роль уже сработала в текущей игре.\n\n"
+            elif user_id in room.active_role_failed_user_ids:
+                status_line = "🎲 В этой игре баф не сработал. Если он не был потрачен, то остался в инвентаре.\n\n"
+            elif user_id in room.active_role_queued_user_ids:
+                status_line = "⏳ Купленная во время этой игры Активная роль сработает только в следующей партии.\n\n"
+    elif key == "active_role" and owned > 0:
+        status_line = "🎟 Баф ждёт следующую новую партию.\n\n"
     return (
         f"<b>{item['title']}</b>\n\n"
         f"{item['description']}\n\n"
@@ -1364,19 +1416,29 @@ def prime_room_shields(room) -> None:
 
 
 def apply_room_active_role_buffs(room) -> set[int]:
+    room.active_role_queued_user_ids.clear()
+    room.active_role_triggered_user_ids.clear()
+    room.active_role_failed_user_ids.clear()
+
     if not buffs_enabled(room):
         return set()
 
+    buff_user_ids: set[int] = set()
     designated_players: list = []
     for player in room.players.values():
         stats = repo.get_player_stats(player.user_id)
         if stats is None or int(stats.get("buff_active_role", 0)) <= 0:
             continue
 
+        buff_user_ids.add(player.user_id)
+
         if random.random() < 0.99:
             designated_players.append(player)
 
+    room.active_role_queued_user_ids = set(buff_user_ids)
+
     if not designated_players:
+        room.active_role_failed_user_ids = set(buff_user_ids)
         return set()
 
     available_active_slots = sum(1 for player in room.players.values() if player.role != ROLE_CITIZEN)
@@ -1410,6 +1472,9 @@ def apply_room_active_role_buffs(room) -> set[int]:
 
     for user_id in satisfied_user_ids:
         repo.consume_buff(user_id, inventory_column="buff_active_role")
+
+    room.active_role_triggered_user_ids = set(satisfied_user_ids)
+    room.active_role_failed_user_ids = set(buff_user_ids) - set(satisfied_user_ids)
 
     return satisfied_user_ids
 
@@ -4525,7 +4590,11 @@ async def on_private_menu_callback(callback: CallbackQuery) -> None:
         await safe_answer()
         return
     if action == "buffs":
-        await show_menu_screen(format_buffs_shop_text(), private_buffs_shop_keyboard())
+        shop_text = format_buffs_shop_text()
+        room = get_player_profile_room(callback.from_user.id)
+        if room is not None and not buffs_enabled(room):
+            shop_text += "\n\n🚫 В текущей игре бафы выключены. Купленные сейчас бафы сработают только в новой партии после включения бафов."
+        await show_menu_screen(shop_text, private_buffs_shop_keyboard())
         await safe_answer()
         return
     if action.startswith("buff:"):
@@ -4554,11 +4623,18 @@ async def on_private_menu_callback(callback: CallbackQuery) -> None:
             currency_label=currency_label,
         )
         if ok:
+            room = get_player_profile_room(callback.from_user.id)
+            success_text = f"Приобретено: {item['success_name']}"
+            if room is not None and room.get_player(callback.from_user.id) is not None:
+                if str(item["inventory_key"]) == "buff_active_role":
+                    room.active_role_queued_user_ids.add(callback.from_user.id)
+                    persist_room(room)
+                    success_text = "Приобретено: Активная роль. В текущей игре баф сработает только в следующей партии."
             await show_menu_screen(
                 format_private_profile_text(user_nickname(callback.from_user), stats),
                 private_profile_keyboard(),
             )
-            await safe_answer(f"Приобретено: {item['success_name']}")
+            await safe_answer(success_text)
             return
         await safe_answer(info, show_alert=True)
         return

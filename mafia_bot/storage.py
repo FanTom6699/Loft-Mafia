@@ -151,6 +151,9 @@ class GameStateRepository:
             "spent_documents_user_ids": sorted(room.spent_documents_user_ids),
             "shielded_user_ids": sorted(room.shielded_user_ids),
             "spent_shield_user_ids": sorted(room.spent_shield_user_ids),
+            "active_role_queued_user_ids": sorted(room.active_role_queued_user_ids),
+            "active_role_triggered_user_ids": sorted(room.active_role_triggered_user_ids),
+            "active_role_failed_user_ids": sorted(room.active_role_failed_user_ids),
             "night_missed_streaks": room.night_missed_streaks,
             "afk_killed_user_ids": sorted(room.afk_killed_user_ids),
             "night_reports": room.night_reports,
@@ -246,6 +249,9 @@ class GameStateRepository:
         room.spent_documents_user_ids = {int(v) for v in payload.get("spent_documents_user_ids", [])}
         room.shielded_user_ids = {int(v) for v in payload.get("shielded_user_ids", [])}
         room.spent_shield_user_ids = {int(v) for v in payload.get("spent_shield_user_ids", [])}
+        room.active_role_queued_user_ids = {int(v) for v in payload.get("active_role_queued_user_ids", [])}
+        room.active_role_triggered_user_ids = {int(v) for v in payload.get("active_role_triggered_user_ids", [])}
+        room.active_role_failed_user_ids = {int(v) for v in payload.get("active_role_failed_user_ids", [])}
         room.night_missed_streaks = {
             int(k): int(v)
             for k, v in payload.get("night_missed_streaks", {}).items()
