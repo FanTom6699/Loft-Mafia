@@ -1,5 +1,6 @@
 import asyncio
 import os
+import random
 import time
 import traceback
 from datetime import datetime, timedelta
@@ -963,6 +964,7 @@ async def launch_game_from_registration(bot: Bot, room, chat_id: int, chat_title
     room.close_registration()
     try:
         room.assign_roles()
+        apply_room_active_role_buffs(room)
         prime_room_documents(room)
         prime_room_shields(room)
         print(
@@ -1243,8 +1245,6 @@ def format_private_profile_text(display_name: str, stats: dict | None) -> str:
     buff_documents = int((stats or {}).get("buff_documents", 0))
     buff_shield = int((stats or {}).get("buff_shield", 0))
     buff_active_role = int((stats or {}).get("buff_active_role", 0))
-    last_role = str((stats or {}).get("last_role", "") or "-")
-    last_role_mark = role_mark_text(last_role) if last_role != "-" else "-"
 
     return (
         "<b>Игровой профиль</b>\n\n"
@@ -1254,8 +1254,7 @@ def format_private_profile_text(display_name: str, stats: dict | None) -> str:
         "<b>🚀 Бафы</b>\n"
         f"📂 Документы: <b>{buff_documents}</b>\n"
         f"🛡 Защита: <b>{buff_shield}</b>\n"
-        f"🎎 Активная роль: <b>{buff_active_role}</b>\n\n"
-        f"🎭 Последняя роль: {last_role_mark}"
+        f"🎎 Активная роль: <b>{buff_active_role}</b>"
     )
 
 
@@ -1282,13 +1281,13 @@ BUFF_CATALOG = {
     },
     "active_role": {
         "title": "🎎 Активная роль",
-        "price": "💎1",
+        "price": "🎟1",
         "price_value": 1,
         "currency": "tickets",
         "inventory_key": "buff_active_role",
         "success_name": "Активная роль",
         "description": "Даёт 99% шанс выпадения активной роли",
-        "details": "Каркас механики: предмет будет влиять на выдачу роли перед стартом новой партии.",
+        "details": "Перед стартом новой партии даёт 99% шанс получить любую роль, кроме Мирного жителя. Если баф используют несколько игроков, активные роли распределяются случайно в пределах доступного числа таких ролей, а баф тратится только у тех, кому он реально сработал.",
     },
 }
 
@@ -1334,8 +1333,7 @@ def format_buff_details_text(key: str, stats: dict | None) -> str:
         f"💰 Цена: <b>{item['price']}</b>\n"
         f"🎒 В инвентаре: <b>{owned}</b>\n\n"
         f"{status_line}"
-        f"{item['details']}\n\n"
-        "<i>Активная роль пока остаётся каркасом. Защита и Документы уже работают.</i>"
+        f"{item['details']}"
     )
 
 
@@ -1363,6 +1361,57 @@ def prime_room_shields(room) -> None:
             continue
         if int(stats.get("buff_shield", 0)) > 0:
             room.arm_shield(player.user_id)
+
+
+def apply_room_active_role_buffs(room) -> set[int]:
+    if not buffs_enabled(room):
+        return set()
+
+    designated_players: list = []
+    for player in room.players.values():
+        stats = repo.get_player_stats(player.user_id)
+        if stats is None or int(stats.get("buff_active_role", 0)) <= 0:
+            continue
+
+        if random.random() < 0.99:
+            designated_players.append(player)
+
+    if not designated_players:
+        return set()
+
+    available_active_slots = sum(1 for player in room.players.values() if player.role != ROLE_CITIZEN)
+    random.shuffle(designated_players)
+    winners = designated_players[:available_active_slots]
+    winner_user_ids = {player.user_id for player in winners}
+
+    satisfied_user_ids = {
+        player.user_id
+        for player in room.players.values()
+        if player.user_id in winner_user_ids and player.role != ROLE_CITIZEN
+    }
+
+    receivers = [
+        player
+        for player in room.players.values()
+        if player.user_id in winner_user_ids and player.role == ROLE_CITIZEN
+    ]
+    donors = [
+        player
+        for player in room.players.values()
+        if player.user_id not in winner_user_ids and player.role != ROLE_CITIZEN
+    ]
+
+    random.shuffle(receivers)
+    random.shuffle(donors)
+
+    for receiver, donor in zip(receivers, donors):
+        receiver.role, donor.role = donor.role, receiver.role
+        satisfied_user_ids.add(receiver.user_id)
+
+    for user_id in satisfied_user_ids:
+        repo.consume_buff(user_id, inventory_column="buff_active_role")
+
+    return satisfied_user_ids
 
 
 async def send_endgame_currency_summaries(bot: Bot, room) -> None:
@@ -1790,7 +1839,7 @@ def private_buffs_shop_keyboard() -> InlineKeyboardMarkup:
         inline_keyboard=[
             [InlineKeyboardButton(text="📁 Документы - 💵150", callback_data="pmenu:buff:documents")],
             [InlineKeyboardButton(text="🛡 Защита - 💵100", callback_data="pmenu:buff:shield")],
-            [InlineKeyboardButton(text="🕺 Активная роль - 💎1", callback_data="pmenu:buff:active_role")],
+            [InlineKeyboardButton(text="🕺 Активная роль - 🎟1", callback_data="pmenu:buff:active_role")],
             [InlineKeyboardButton(text="⬅️ Назад", callback_data="pmenu:profile")],
         ]
     )
