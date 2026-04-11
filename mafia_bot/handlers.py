@@ -165,6 +165,37 @@ SETTINGS_GAME_MODE_TEXT = (
 )
 
 
+def game_mode_announcement_text(mode: str) -> str | None:
+    if mode == GAME_MODE_INVISIBLE:
+        return (
+            "━━━━━━━━━━━━━━\n"
+            "🔮 <b>РЕЖИМ «НЕВИДИМКА» АКТИВИРОВАН</b>\n"
+            "━━━━━━━━━━━━━━\n\n"
+            "<b>Пророчество</b>\n"
+            "Говорят, этой ночью город лишится лиц…\n"
+            "Имена исчезнут, а правда растворится во тьме.\n"
+            "Ты будешь слышать слова,\n"
+            "но не узнаешь, кто их произнёс.\n"
+            "Доверие станет иллюзией,\n"
+            "а выбор - игрой вслепую.\n\n"
+            "Посмотрим, кто доживёт до конца…\n\n"
+            "📜 <b>Правила режима</b>\n"
+            "• Во время игры все ники скрыты и заменены на «Невидимка».\n"
+            "• Регистрация в лобби проходит как обычно, с видимыми никами.\n"
+            "• Игровые сообщения, роли и отчёты работают как в классике, но ники во время партии скрыты.\n"
+            "• Списки игроков и союзников тоже показываются обезличенно.\n"
+            "• После завершения игры личности игроков раскрываются.\n"
+            "• Пока активен этот режим, остальные настройки заблокированы до возврата в «Классику».\n\n"
+            "━━━━━━━━━━━━━━"
+        )
+    if mode == GAME_MODE_CLASSIC:
+        return (
+            "<b>Включён режим «Классика».</b>\n\n"
+            "Все настройки снова можно менять вручную в меню настроек."
+        )
+    return None
+
+
 def get_phase_lock(chat_id: int) -> asyncio.Lock:
     lock = phase_locks.get(chat_id)
     if lock is None:
@@ -4544,8 +4575,13 @@ async def on_private_settings_callback(callback: CallbackQuery) -> None:
         if value not in GAME_MODE_TITLES:
             await safe_answer("Неизвестный режим.", show_alert=True)
             return
+        previous_mode = game_mode_from_settings(settings)
         settings = apply_game_mode_preset(settings, value)
         settings = save_chat_settings(chat_id, settings)
+        if previous_mode != value:
+            announcement_text = game_mode_announcement_text(value)
+            if announcement_text:
+                await callback.bot.send_message(chat_id, announcement_text, parse_mode="HTML")
         await show_settings_screen(SETTINGS_GAME_MODE_TEXT, private_settings_game_mode_keyboard(chat_id, settings))
         await safe_answer("Сохранено")
         return
