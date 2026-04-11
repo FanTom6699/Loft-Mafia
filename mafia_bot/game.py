@@ -1728,7 +1728,10 @@ class GameRoom:
         return reports
 
     def add_night_report_line(self, user_id: int, line: str) -> None:
-        self.night_reports.setdefault(user_id, []).append(line)
+        report_lines = self.night_reports.setdefault(user_id, [])
+        if report_lines and report_lines[-1] == line:
+            return
+        report_lines.append(line)
 
     def queue_last_words(self, players: list[Player]) -> list[int]:
         queued: list[int] = []
