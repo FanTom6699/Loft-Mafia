@@ -1472,6 +1472,19 @@ async def is_group_admin(bot: Bot, chat_id: int, user_id: int) -> bool:
     return member.status in {"administrator", "creator"}
 
 
+async def is_group_settings_admin(bot: Bot, chat_id: int, user_id: int) -> bool:
+    try:
+        member = await bot.get_chat_member(chat_id, user_id)
+    except Exception:
+        return False
+
+    if member.status == "creator":
+        return True
+    if member.status != "administrator":
+        return False
+    return bool(getattr(member, "can_change_info", False))
+
+
 async def bot_has_delete_permission(bot: Bot, chat_id: int) -> bool:
     try:
         me = await bot.get_me()
@@ -3276,6 +3289,10 @@ async def cmd_settings(message: Message) -> None:
         await message.answer("Настройки вызываются из игрового чата.")
         return
 
+    if not await is_group_settings_admin(message.bot, message.chat.id, message.from_user.id):
+        await message.answer("Настройки доступны только администраторам с правом «Изменение информации группы».")
+        return
+
     if not repo.has_private_user(message.from_user.id):
         start_link = await bot_start_link(message.bot)
         await message.answer(
@@ -3507,6 +3524,11 @@ async def cmd_stop(message: Message) -> None:
     if message.chat.type == "private":
         await message.answer("Останавливать игру нужно в групповом чате.")
         return
+    if message.from_user is None:
+        return
+    if not await is_group_settings_admin(message.bot, message.chat.id, message.from_user.id):
+        await message.answer("Отмена игры доступна только администраторам с правом «Изменение информации группы».")
+        return
 
     room = storage.get_room(message.chat.id)
     if room is None:
@@ -3704,6 +3726,12 @@ async def on_registration_action(callback: CallbackQuery) -> None:
         return
 
     if action == "finish_cancel":
+        if not await is_group_settings_admin(callback.bot, chat_id, callback.from_user.id):
+            await callback.answer(
+                "Отмена игры доступна только администраторам с правом «Изменение информации группы».",
+                show_alert=True,
+            )
+            return
         if room.started:
             await callback.answer("Игра уже началась.", show_alert=True)
             return
@@ -3722,6 +3750,12 @@ async def on_registration_action(callback: CallbackQuery) -> None:
         return
 
     if action == "cancel":
+        if not await is_group_settings_admin(callback.bot, chat_id, callback.from_user.id):
+            await callback.answer(
+                "Отмена игры доступна только администраторам с правом «Изменение информации группы».",
+                show_alert=True,
+            )
+            return
         if room.registration_open:
             room.close_registration()
             persist_room(room)
@@ -4467,6 +4501,14 @@ async def on_private_settings_callback(callback: CallbackQuery) -> None:
     except ValueError:
         await safe_answer("Некорректный чат настроек.", show_alert=True)
         return
+
+    if not await is_group_settings_admin(callback.bot, chat_id, callback.from_user.id):
+        await safe_answer(
+            "Настройки доступны только администраторам с правом «Изменение информации группы».",
+            show_alert=True,
+        )
+        return
+
     action = parts[2]
     settings = load_chat_settings(chat_id)
 
