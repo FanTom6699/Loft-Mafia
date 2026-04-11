@@ -301,7 +301,7 @@ class GameStateRepository:
                 mafia_game = 1 if player.role in MAFIA_ROLES else 0
                 maniac_game = 1 if player.role == ROLE_MANIAC else 0
                 civilian_game = 1 if player.role not in MAFIA_ROLES and player.role != ROLE_MANIAC else 0
-                money_award = win_money if won else 0
+                money_award = win_money if won and player.alive else 0
 
                 conn.execute(
                     """

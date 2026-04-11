@@ -374,9 +374,7 @@ def private_settings_main_text(settings: dict) -> str:
 
 
 def private_game_send_kwargs(room) -> dict:
-    if not content_protection_enabled(room):
-        return {}
-    return {"protect_content": True}
+    return {}
 
 
 def night_role_announcement_text(room, role_name: str, target=None, *, variant: str = "default") -> str:
@@ -835,38 +833,16 @@ def night_skipped_user_ids(room) -> list[int]:
     return skipped
 
 
-def skipped_night_chat_text(player) -> str | None:
-    if player.role == ROLE_BUM:
-        return "🚷 🧙🏼‍♂️ Бомж сегодня отдыхает"
-    if player.role == ROLE_DOCTOR:
-        return "🚷 👨🏼‍⚕️ Доктор предпочитает не играть"
-    if player.role == ROLE_MANIAC:
-        return "🚷 🔪 Маньяк предпочитает не играть"
-    if player.role == ROLE_MISTRESS:
-        return "🚷 💃🏼 Любовница предпочитает не играть"
-    if player.role == ROLE_DON:
-        return "🚷 🤵🏻 Дон сегодня отдыхает"
-    if player.role == ROLE_COMMISSAR:
-        return "🚷 🕵️‍ Комиссар Каттани не хочет участвовать в наших баталиях"
-    return None
-
-
 async def mark_skipped_night_menus(bot: Bot, room, skipped_user_ids: list[int]) -> None:
     if not skipped_user_ids:
         return
 
     keyboard = skipped_turn_keyboard(room.chat_id)
-    chat_messages: list[str] = []
     for user_id in skipped_user_ids:
-        player = room.get_player(user_id)
-        if player is not None:
-            chat_text = skipped_night_chat_text(player)
-            if chat_text is not None:
-                chat_messages.append(chat_text)
         message_id = get_action_menu_message_id(room.chat_id, user_id)
         if message_id is None:
             continue
-        skipped_text = f"{build_action_prompt_text(room, user_id)}\n\nВы пропустили ход."
+        skipped_text = f"{build_action_prompt_text(room, user_id)}\n\nВремя вышло, ты опоздал с ходом."
         try:
             await bot.edit_message_text(
                 chat_id=user_id,
@@ -883,9 +859,6 @@ async def mark_skipped_night_menus(bot: Bot, room, skipped_user_ids: list[int]) 
                 )
             except Exception:
                 continue
-
-    for chat_text in dict.fromkeys(chat_messages):
-        await safe_send_message(bot, room.chat_id, chat_text)
 
 
 def format_killer_sources_text(sources: list[str]) -> str:
@@ -1251,14 +1224,14 @@ def format_player_stats_text(stats: dict) -> str:
     )
 
 
-def format_endgame_currency_text(player, stats: dict, won: bool) -> str:
+def format_endgame_currency_text(player, stats: dict, reward_awarded: bool) -> str:
     name = escape((player.full_name or "").strip() or f"Игрок {player.user_id}")
     money = int(stats.get("money", 0))
     tickets = int(stats.get("tickets", 0))
     buff_documents = int(stats.get("buff_documents", 0))
     buff_shield = int(stats.get("buff_shield", 0))
     buff_active_role = int(stats.get("buff_active_role", 0))
-    if won:
+    if reward_awarded:
         return (
             "<b>Игра завершена</b>\n"
             f'За победу в роли "{escape(player.role)}" тебе начислили 💵 10!\n\n'
@@ -1491,10 +1464,11 @@ async def send_endgame_currency_summaries(bot: Bot, room) -> None:
             won = player.role == ROLE_MANIAC
         elif room.winner_team == "Мирные жители":
             won = player.role not in MAFIA_ROLES and player.role != ROLE_MANIAC
+        reward_awarded = won and player.alive
         try:
             await bot.send_message(
                 player.user_id,
-                format_endgame_currency_text(player, stats, won),
+                format_endgame_currency_text(player, stats, reward_awarded),
                 reply_markup=private_profile_keyboard(),
                 **private_game_send_kwargs(room),
             )
@@ -2650,7 +2624,11 @@ async def announce_don_transfer(room, bot: Bot, don_successor_id: int | None) ->
         return
 
     don_name = room_player_mark(room, new_don)
-    await bot.send_message(room.chat_id, "<b>🤵🏼 Мафия</b> унаследовал роль <b>🤵🏻 Дон</b>", parse_mode="HTML")
+    await bot.send_message(
+        room.chat_id,
+        f"{don_name} унаследовал роль <b>🤵🏻 Дон</b>",
+        parse_mode="HTML",
+    )
     try:
         await bot.send_message(
             don_successor_id,
@@ -2739,8 +2717,6 @@ async def process_night_end(bot: Bot, chat_id: int, timer_reason: str | None = N
             return
 
         cancel_phase_timer(chat_id)
-        mafia_alive_tonight = any(player.alive and player.role in {ROLE_DON, ROLE_MAFIA} for player in room.players.values())
-        mafia_target_tonight = room.current_mafia_target_id()
         skipped_user_ids = night_skipped_user_ids(room)
         await mark_skipped_night_menus(bot, room, skipped_user_ids)
         (
@@ -2810,9 +2786,6 @@ async def process_night_end(bot: Bot, chat_id: int, timer_reason: str | None = N
 
         if lucky_triggered:
             await bot.send_message(chat_id, "☝️ Кому-то из игроков повезло")
-
-        if mafia_alive_tonight and mafia_target_tonight is None:
-            await bot.send_message(chat_id, "🚷 🤵🏻 Дон сегодня отдыхает")
 
         await send_phase_media(bot, chat_id, room.day_media_caption(), DAY_IMAGE_PATH)
 
@@ -4126,6 +4099,14 @@ async def on_action_callback(callback: CallbackQuery) -> None:
         if ok:
             actor = room.get_player(callback.from_user.id)
             target = room.get_player(target_id)
+            if not room.mafia_target_announced:
+                await safe_send_message(
+                    callback.bot,
+                    room.chat_id,
+                    night_role_announcement_text(room, ROLE_MAFIA),
+                    parse_mode="HTML",
+                )
+                room.mafia_target_announced = True
             if actor is not None and target is not None:
                 role_mark = role_mark_text(actor.role)
                 await send_mafia_private_update(
@@ -4144,14 +4125,6 @@ async def on_action_callback(callback: CallbackQuery) -> None:
                     "Голосование мафии завершено\n"
                     f"Мафия принесла в жертву {final_name}.",
                 )
-                if final_target is not None and not room.mafia_target_announced:
-                    await safe_send_message(
-                        callback.bot,
-                        room.chat_id,
-                        night_role_announcement_text(room, ROLE_DON, final_target),
-                        parse_mode="HTML",
-                    )
-                    room.mafia_target_announced = True
             if target is not None:
                 selected_name = room_player_label(room, target)
                 selected_user_id = target.user_id
@@ -4311,12 +4284,19 @@ async def on_action_callback(callback: CallbackQuery) -> None:
                 reply_markup=None,
             )
 
-            if voter is not None and target is not None and not is_secret_voting_enabled(room):
-                await callback.bot.send_message(
-                    room.chat_id,
-                    f"{room_player_mark(room, voter)} проголосовал за {room_player_mark(room, target)}",
-                    parse_mode="HTML",
-                )
+            if voter is not None and target is not None:
+                if not is_secret_voting_enabled(room):
+                    await callback.bot.send_message(
+                        room.chat_id,
+                        f"{room_player_mark(room, voter)} проголосовал за {room_player_mark(room, target)}",
+                        parse_mode="HTML",
+                    )
+                else:
+                    await callback.bot.send_message(
+                        room.chat_id,
+                        f"🗳 {room_player_mark(room, voter)} проголосовал.",
+                        parse_mode="HTML",
+                    )
             await maybe_finish_phase_early(callback.bot, room)
             persist_room(room)
         else:
@@ -4359,6 +4339,12 @@ async def on_action_callback(callback: CallbackQuery) -> None:
             await callback.bot.send_message(
                 room.chat_id,
                 f"{room_player_mark(room, voter)} пропускает голосование.",
+                parse_mode="HTML",
+            )
+        else:
+            await callback.bot.send_message(
+                room.chat_id,
+                f"🗳 {room_player_mark(room, voter)} пропускает голосование.",
                 parse_mode="HTML",
             )
 

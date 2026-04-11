@@ -1301,12 +1301,12 @@ class GameRoom:
 
         notify_actions = action_notifications_from_settings(self.settings)
 
-        if notify_actions and mistress_effective_target_id is not None:
+        if mistress_effective_target_id is not None:
             blocked_target = self.get_player(mistress_effective_target_id)
             if blocked_target is not None and blocked_target.alive:
                 self.add_night_report_line(
                     blocked_target.user_id,
-                    "\"Ты со мною забудь обо всём...\", - пела 💃🏼 Любовница",
+                    "💃🏼 Любовница пришла к тебе этой ночью. Днем ты не сможешь писать в чат и голосовать.",
                 )
 
         if doctor_target_id is not None:
