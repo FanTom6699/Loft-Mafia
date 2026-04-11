@@ -771,7 +771,7 @@ def skipped_turn_keyboard(chat_id: int) -> InlineKeyboardMarkup:
         inline_keyboard=[
             [
                 InlineKeyboardButton(
-                    text="Пропустить ход",
+                    text=skip_turn_button_text(),
                     callback_data=f"noop:skip:{chat_id}",
                 )
             ]
@@ -786,6 +786,14 @@ def locked_choice_keyboard(selected_name: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[[InlineKeyboardButton(text=label, callback_data="noop:locked")]]
     )
+
+
+def skip_turn_button_text(selected: bool = False) -> str:
+    return "✅ 🚷 Пропустить ход" if selected else "🚷 Пропустить ход"
+
+
+def skip_turn_selected_text() -> str:
+    return "Ты выбрал 🚷 Пропуск хода"
 
 
 def locked_choice_text(room, actor_user_id: int, selected_name: str, selected_user_id: int | None = None) -> str:
@@ -2389,7 +2397,7 @@ def build_action_keyboard(room, actor_user_id: int) -> InlineKeyboardMarkup | No
                 ]
             )
         if day_vote_skip_enabled(room):
-            skip_text = "✅ Пропустить ход" if selected_target_id == 0 else "Пропустить ход"
+            skip_text = skip_turn_button_text(selected_target_id == 0)
             rows.append(
                 [
                     InlineKeyboardButton(
@@ -2400,7 +2408,7 @@ def build_action_keyboard(room, actor_user_id: int) -> InlineKeyboardMarkup | No
             )
 
     if room.phase == "night" and rows and night_action_skip_enabled(room):
-        skip_text = "✅ Пропустить ход" if selected_target_id == 0 else "Пропустить ход"
+        skip_text = skip_turn_button_text(selected_target_id == 0)
         rows.append(
             [
                 InlineKeyboardButton(
@@ -2601,6 +2609,9 @@ async def push_trial_vote_menus(bot: Bot, room, candidate) -> None:
 
 
 async def send_mafia_private_update(room, bot, text: str) -> None:
+    if len(room.alive_mafia()) <= 1:
+        return
+
     for player in room.alive_players():
         if player.role not in {ROLE_DON, ROLE_MAFIA}:
             continue
@@ -2807,6 +2818,20 @@ async def process_night_end(bot: Bot, chat_id: int, timer_reason: str | None = N
             if room.phase != PHASE_FINISHED:
                 non_afk_eliminated = [player for player in eliminated if player.user_id not in afk_killed_ids]
                 await prompt_last_words(bot, room, non_afk_eliminated)
+            else:
+                for dead in eliminated:
+                    if dead.user_id in afk_killed_ids:
+                        continue
+                    try:
+                        await safe_send_message(
+                            bot,
+                            dead.user_id,
+                            "<b>Тебя убили :(</b>",
+                            parse_mode="HTML",
+                            **private_game_send_kwargs(room),
+                        )
+                    except Exception:
+                        pass
 
             for dead in eliminated:
                 if dead.user_id not in afk_killed_ids:
@@ -4330,21 +4355,21 @@ async def on_action_callback(callback: CallbackQuery) -> None:
             return
 
         room.day_votes[callback.from_user.id] = 0
-        await callback.answer("Пропуск голосования принят.")
+        await callback.answer("🚷 Пропуск голосования принят.")
         await callback.message.edit_text(
-            build_action_prompt_text(room, callback.from_user.id) + "\n\nТы выбрал пропуск",
+            build_action_prompt_text(room, callback.from_user.id) + f"\n\n{skip_turn_selected_text()}",
             reply_markup=None,
         )
         if not is_secret_voting_enabled(room):
             await callback.bot.send_message(
                 room.chat_id,
-                f"{room_player_mark(room, voter)} пропускает голосование.",
+                f"🚷 {room_player_mark(room, voter)} пропускает голосование.",
                 parse_mode="HTML",
             )
         else:
             await callback.bot.send_message(
                 room.chat_id,
-                f"🗳 {room_player_mark(room, voter)} пропускает голосование.",
+                f"🚷 {room_player_mark(room, voter)} пропускает голосование.",
                 parse_mode="HTML",
             )
 
@@ -4465,17 +4490,17 @@ async def on_noop_callback(callback: CallbackQuery) -> None:
         try:
             chat_id = int(callback.data.split(":", 2)[2])
         except (IndexError, ValueError):
-            await callback.answer("Некорректный пропуск хода.", show_alert=True)
+            await callback.answer("🚷 Некорректный пропуск хода.", show_alert=True)
             return
         room = storage.get_room(chat_id)
         if room is None or room.phase != PHASE_NIGHT:
-            await callback.answer("Сейчас нельзя пропустить ход.", show_alert=True)
+            await callback.answer("🚷 Сейчас нельзя пропустить ход.", show_alert=True)
             return
         if callback.message.chat.type != "private":
-            await callback.answer("Пропуск ночного хода доступен только в ЛС бота.", show_alert=True)
+            await callback.answer("🚷 Пропуск ночного хода доступен только в ЛС бота.", show_alert=True)
             return
         if not night_action_skip_enabled(room):
-            await callback.answer("Пропуск ночного хода отключен в настройках.", show_alert=True)
+            await callback.answer("🚷 Пропуск ночного хода отключен в настройках.", show_alert=True)
             return
         ok, info = room.set_night_skip(callback.from_user.id)
         await callback.answer(info, show_alert=not ok)
@@ -4483,7 +4508,7 @@ async def on_noop_callback(callback: CallbackQuery) -> None:
             return
         try:
             await callback.message.edit_text(
-                build_action_prompt_text(room, callback.from_user.id) + "\n\nТы выбрал пропуск",
+                build_action_prompt_text(room, callback.from_user.id) + f"\n\n{skip_turn_selected_text()}",
                 reply_markup=None,
             )
         except Exception:

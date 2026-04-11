@@ -810,14 +810,14 @@ class GameRoom:
 
     def set_night_skip(self, user_id: int) -> tuple[bool, str]:
         if not self.can_skip_night_action(user_id):
-            return False, "Сейчас нельзя пропустить ход."
+            return False, "🚷 Сейчас нельзя пропустить ход."
 
         self.night_skipped_user_ids.add(user_id)
         alive_mafia_ids = {player.user_id for player in self.alive_mafia()}
         committed_mafia_ids = set(self.night_votes.keys()) | set(self.night_skipped_user_ids)
         if alive_mafia_ids and alive_mafia_ids.issubset(committed_mafia_ids):
             self.mafia_vote_locked = True
-        return True, "Ход пропущен."
+        return True, "🚷 Ход пропущен."
 
     def arm_shield(self, user_id: int) -> bool:
         player = self.get_player(user_id)
@@ -913,7 +913,13 @@ class GameRoom:
             return True, None
 
         votes_by_target: dict[int, int] = {}
-        for target_id in self.day_votes.values():
+        skipped_count = 0
+        for voter_user_id, target_id in self.day_votes.items():
+            if voter_user_id not in eligible_voter_ids:
+                continue
+            if target_id == 0:
+                skipped_count += 1
+                continue
             target = self.get_player(target_id)
             if target is None or not target.alive:
                 continue
@@ -923,8 +929,6 @@ class GameRoom:
             return True, None
 
         max_votes = max(votes_by_target.values())
-        voted_ids = {user_id for user_id in self.day_votes if user_id in eligible_voter_ids}
-        skipped_count = len(eligible_voter_ids - voted_ids)
         if skipped_count > max_votes:
             return True, None
 
