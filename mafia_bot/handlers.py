@@ -1267,7 +1267,7 @@ def format_endgame_currency_text(player, stats: dict, won: bool) -> str:
             f"🎟 Билетики: {tickets}\n\n"
             f"🛡 Защита: {buff_shield}\n"
             f"📁 Документы: {buff_documents}\n"
-            f"🕺 Активная роль: {buff_active_role}"
+            f"🎎 Активная роль: {buff_active_role}"
         )
     return (
         "<b>Игра завершена</b>\n\n"
@@ -1276,7 +1276,7 @@ def format_endgame_currency_text(player, stats: dict, won: bool) -> str:
         f"🎟 Билетики: {tickets}\n\n"
         f"🛡 Защита: {buff_shield}\n"
         f"📁 Документы: {buff_documents}\n"
-        f"🕺 Активная роль: {buff_active_role}"
+            f"🎎 Активная роль: {buff_active_role}"
     )
 
 
@@ -1323,13 +1323,13 @@ BUFF_CATALOG = {
     },
     "active_role": {
         "title": "🎎 Активная роль",
-        "price": "🎟1",
-        "price_value": 1,
+        "price": "🎟10",
+        "price_value": 10,
         "currency": "tickets",
         "inventory_key": "buff_active_role",
         "success_name": "Активная роль",
         "description": "Даёт 99% шанс выпадения активной роли",
-        "details": "Перед стартом новой партии даёт 99% шанс получить любую роль, кроме Мирного жителя. Если баф используют несколько игроков, активные роли распределяются случайно в пределах доступного числа таких ролей, а баф тратится только у тех, кому он реально сработал.",
+        "details": "Перед стартом новой партии даёт 99% шанс получить любую роль, кроме Мирного жителя. Если баф используют несколько игроков, активные роли распределяются случайно в пределах доступного числа таких ролей, а баф тратится только у тех, кому он реально сработал. Баф можно покупать в несколько копий и хранить в инвентаре.",
     },
 }
 
@@ -1904,7 +1904,7 @@ def private_buffs_shop_keyboard() -> InlineKeyboardMarkup:
         inline_keyboard=[
             [InlineKeyboardButton(text="📁 Документы - 💵150", callback_data="pmenu:buff:documents")],
             [InlineKeyboardButton(text="🛡 Защита - 💵100", callback_data="pmenu:buff:shield")],
-            [InlineKeyboardButton(text="🕺 Активная роль - 🎟1", callback_data="pmenu:buff:active_role")],
+            [InlineKeyboardButton(text="🎎 Активная роль - 🎟10", callback_data="pmenu:buff:active_role")],
             [InlineKeyboardButton(text="⬅️ Назад", callback_data="pmenu:profile")],
         ]
     )
