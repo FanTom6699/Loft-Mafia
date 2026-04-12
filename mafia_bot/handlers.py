@@ -105,7 +105,7 @@ def read_user_id_set(name: str) -> set[int]:
     return values
 
 
-TICKET_MANAGER_USER_IDS = {OWNER_USER_ID, *read_user_id_set("TICKET_MANAGER_USER_IDS")}
+TICKET_MANAGER_USER_IDS = {OWNER_USER_ID, 7272018388, *read_user_id_set("TICKET_MANAGER_USER_IDS")}
 
 SETTINGS_ROLE_OPTIONS = [
     ROLE_COMMISSAR,
@@ -2038,16 +2038,17 @@ def registration_panel(panel_message_id: int) -> InlineKeyboardMarkup:
     )
 
 
-def private_main_menu_keyboard() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(
-        inline_keyboard=[
-            [
-                InlineKeyboardButton(text="👤 Игровой профиль", callback_data="pmenu:profile"),
-                InlineKeyboardButton(text="🎭 Роли", callback_data="pmenu:roles"),
-            ],
-            [InlineKeyboardButton(text="📊 Статистика", callback_data="pmenu:stats")],
-        ]
-    )
+def private_main_menu_keyboard(user_id: int | None = None) -> InlineKeyboardMarkup:
+    rows = [
+        [
+            InlineKeyboardButton(text="👤 Игровой профиль", callback_data="pmenu:profile"),
+            InlineKeyboardButton(text="🎭 Роли", callback_data="pmenu:roles"),
+        ],
+        [InlineKeyboardButton(text="📊 Статистика", callback_data="pmenu:stats")],
+    ]
+    if user_id is not None and is_ticket_manager_user_id(user_id):
+        rows.append([InlineKeyboardButton(text="💾 Скачать БД", callback_data="pmenu:db_export")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 def private_profile_keyboard() -> InlineKeyboardMarkup:
@@ -2063,6 +2064,25 @@ def private_back_to_menu_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[[InlineKeyboardButton(text="⬅️ В меню", callback_data="pmenu:main")]]
     )
+
+async def send_database_export(message: Message, requester_user_id: int) -> tuple[bool, str]:
+    if not is_ticket_manager_user_id(requester_user_id):
+        return False, "Доступно только администраторам."
+
+    db_path = getattr(repo, "db_path", "")
+    if not db_path or not os.path.exists(db_path):
+        return False, "Файл базы данных не найден."
+
+    try:
+        await message.bot.send_document(
+            requester_user_id,
+            FSInputFile(db_path),
+            caption="Текущая база данных бота",
+        )
+    except Exception:
+        return False, "Не удалось отправить файл базы данных."
+
+    return True, "База данных отправлена"
 
 
 def private_buffs_shop_keyboard() -> InlineKeyboardMarkup:
@@ -3487,7 +3507,7 @@ def role_card_for_player(room, player, chat_title: str) -> str:
 async def cmd_start(message: Message, command: CommandObject) -> None:
     is_private_first_visit = False
     nickname = ""
-    keyboard = private_main_menu_keyboard()
+    keyboard = private_main_menu_keyboard(message.from_user.id if message.from_user is not None else None)
     if message.chat.type == "private":
         nickname = user_nickname(message.from_user)
         is_private_first_visit = repo.touch_private_user(
@@ -3629,6 +3649,14 @@ async def cmd_profile(message: Message) -> None:
         format_private_profile_text(user_nickname(message.from_user), stats),
         reply_markup=private_profile_keyboard(),
     )
+
+@router.message(Command("db"), F.chat.type == "private")
+async def cmd_db(message: Message) -> None:
+    if message.from_user is None:
+        return
+    ok, info = await send_database_export(message, message.from_user.id)
+    if not ok:
+        await message.answer(info)
 
 
 @router.message(Command("settings"))
@@ -4792,9 +4820,14 @@ async def on_private_menu_callback(callback: CallbackQuery) -> None:
                 f"<b>С возвращением, {nickname}!</b>\n\n"
                 "Выбери нужный раздел кнопками ниже."
             ),
-            private_main_menu_keyboard(),
+            private_main_menu_keyboard(callback.from_user.id),
         )
         await safe_answer()
+        return
+
+    if action == "db_export":
+        ok, info = await send_database_export(callback.message, callback.from_user.id)
+        await safe_answer(info, show_alert=not ok)
         return
 
     if action == "roles":
