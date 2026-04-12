@@ -391,7 +391,7 @@ def private_settings_main_text(settings: dict) -> str:
 
 
 def private_game_send_kwargs(room) -> dict:
-    return {}
+    return {"parse_mode": "HTML"}
 
 
 def night_role_announcement_text(room, role_name: str, target=None, *, variant: str = "default") -> str:
@@ -2852,7 +2852,6 @@ async def send_mafia_private_update(room, bot, text: str) -> None:
             await bot.send_message(
                 player.user_id,
                 text,
-                parse_mode="HTML",
                 **private_game_send_kwargs(room),
             )
         except Exception:
@@ -2991,7 +2990,7 @@ async def process_night_end(bot: Bot, chat_id: int, timer_reason: str | None = N
                 for message_text in compact_night_report_messages(lines):
                     if "пытались убить, но тебе повезло" in message_text.lower():
                         lucky_triggered = True
-                    await safe_send_message(bot, user_id, message_text, parse_mode="HTML", **private_game_send_kwargs(room))
+                    await safe_send_message(bot, user_id, message_text, **private_game_send_kwargs(room))
             except Exception:
                 continue
 
@@ -3009,7 +3008,6 @@ async def process_night_end(bot: Bot, chat_id: int, timer_reason: str | None = N
                         bot,
                         sergeant.user_id,
                         sergeant_commissar_check_text(room, target_user_id, result_role),
-                        parse_mode="HTML",
                         **private_game_send_kwargs(room),
                     )
                 except Exception:
@@ -3060,7 +3058,6 @@ async def process_night_end(bot: Bot, chat_id: int, timer_reason: str | None = N
                             bot,
                             dead.user_id,
                             "<b>Тебя убили :(</b>",
-                            parse_mode="HTML",
                             **private_game_send_kwargs(room),
                         )
                     except Exception:
@@ -5279,7 +5276,6 @@ async def on_private_text(message: Message) -> None:
             await message.bot.send_message(
                 teammate.user_id,
                 relay_text,
-                parse_mode="HTML",
                 **private_game_send_kwargs(room),
             )
         except Exception:
