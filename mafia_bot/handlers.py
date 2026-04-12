@@ -1865,30 +1865,30 @@ async def handle_ticket_adjustment_command(message: Message, *, action: str) -> 
         try:
             await message.bot.send_message(
                 target_id,
-                f"{sender_mark} вам передал {amount} билетиков",
+                f"{sender_mark} вам передал 🎟 {amount}",
                 parse_mode="HTML",
             )
         except Exception:
             pass
-        response_text = f"{target_mark} получил {amount} билетиков"
+        response_text = f"{target_mark} получил 🎟 {amount}"
     elif action == "grant":
         try:
             await message.bot.send_message(
                 target_id,
-                f"Администратор начислил вам {amount} билетиков",
+                f"Администратор начислил вам 🎟 {amount}",
             )
         except Exception:
             pass
-        response_text = f"Администратор начислил {target_mark} {amount} билетиков"
+        response_text = f"Администратор начислил {target_mark} 🎟 {amount}"
     else:
         try:
             await message.bot.send_message(
                 target_id,
-                f"Администрация забрала у вас {amount} билетиков",
+                f"Администрация забрала у вас 🎟 {amount}",
             )
         except Exception:
             pass
-        response_text = f"Администрация забрала у {target_mark} {amount} билетиков"
+        response_text = f"Администрация забрала у {target_mark} 🎟 {amount}"
     await message.reply(response_text, parse_mode="HTML")
 
 
