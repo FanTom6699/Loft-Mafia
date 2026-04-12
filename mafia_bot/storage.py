@@ -68,11 +68,13 @@ class GameStateRepository:
                 CREATE TABLE IF NOT EXISTS private_users (
                     user_id INTEGER PRIMARY KEY,
                     display_name TEXT NOT NULL,
+                    username TEXT NOT NULL DEFAULT '',
                     first_seen_at TEXT NOT NULL,
                     last_seen_at TEXT NOT NULL
                 )
                 """
             )
+            self._ensure_column(conn, "private_users", "username", "TEXT NOT NULL DEFAULT ''")
             conn.execute(
                 """
                 CREATE TABLE IF NOT EXISTS chat_settings (
@@ -589,8 +591,9 @@ class GameStateRepository:
     def consume_documents_buff(self, user_id: int) -> bool:
         return self.consume_buff(user_id, inventory_column="buff_documents")
 
-    def touch_private_user(self, user_id: int, display_name: str) -> bool:
+    def touch_private_user(self, user_id: int, display_name: str, username: str | None = None) -> bool:
         now = datetime.now().isoformat()
+        normalized_username = (username or "").strip().lstrip("@")
         with sqlite3.connect(self.db_path) as conn:
             row = conn.execute(
                 "SELECT user_id FROM private_users WHERE user_id = ?",
@@ -603,12 +606,13 @@ class GameStateRepository:
                     INSERT INTO private_users(
                         user_id,
                         display_name,
+                        username,
                         first_seen_at,
                         last_seen_at
                     )
-                    VALUES(?, ?, ?, ?)
+                    VALUES(?, ?, ?, ?, ?)
                     """,
-                    (user_id, display_name, now, now),
+                    (user_id, display_name, normalized_username, now, now),
                 )
                 conn.commit()
                 return True
@@ -616,10 +620,10 @@ class GameStateRepository:
             conn.execute(
                 """
                 UPDATE private_users
-                SET display_name = ?, last_seen_at = ?
+                SET display_name = ?, username = ?, last_seen_at = ?
                 WHERE user_id = ?
                 """,
-                (display_name, now, user_id),
+                (display_name, normalized_username, now, user_id),
             )
             conn.commit()
         return False
@@ -631,6 +635,30 @@ class GameStateRepository:
                 (user_id,),
             ).fetchone()
         return row is not None
+
+    def get_private_user_by_username(self, username: str) -> dict | None:
+        normalized_username = (username or "").strip().lstrip("@").lower()
+        if not normalized_username:
+            return None
+
+        with sqlite3.connect(self.db_path) as conn:
+            row = conn.execute(
+                """
+                SELECT user_id, display_name, username
+                FROM private_users
+                WHERE lower(username) = ?
+                """,
+                (normalized_username,),
+            ).fetchone()
+
+        if row is None:
+            return None
+
+        return {
+            "user_id": int(row[0]),
+            "display_name": str(row[1] or "").strip(),
+            "username": str(row[2] or "").strip(),
+        }
 
     def get_chat_settings(self, chat_id: int) -> dict | None:
         with sqlite3.connect(self.db_path) as conn:

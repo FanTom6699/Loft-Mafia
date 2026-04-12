@@ -1753,6 +1753,24 @@ def is_ticket_manager_user_id(user_id: int) -> bool:
     return user_id in TICKET_MANAGER_USER_IDS
 
 
+def ticket_command_usage_text(command_name: str) -> str:
+    return f"Использование: {command_name} <число> [@username|ID] или ответом на сообщение."
+
+
+def ticket_command_hint_text(text: str | None) -> str | None:
+    command_token = ((text or "").strip().split(maxsplit=1) or [""])[0].lower()
+    if not command_token.startswith("!"):
+        return None
+
+    if command_token.startswith("!перед"):
+        return ticket_command_usage_text("!передать")
+    if command_token.startswith("!забр"):
+        return ticket_command_usage_text("!забрать")
+    if command_token.startswith("!начис"):
+        return ticket_command_usage_text("!начислить")
+    return None
+
+
 async def resolve_ticket_command_target(message: Message, raw_target: str | None) -> tuple[int | None, str | None, str | None]:
     replied = message.reply_to_message
     if replied is not None and replied.from_user is not None and not replied.from_user.is_bot:
@@ -1766,19 +1784,12 @@ async def resolve_ticket_command_target(message: Message, raw_target: str | None
         return None, None, "Укажи пользователя через ответ на сообщение, @username или ID."
 
     if candidate.startswith("@"):
-        try:
-            chat = await message.bot.get_chat(candidate)
-        except Exception:
+        private_user = repo.get_private_user_by_username(candidate)
+        if private_user is None:
             return None, None, "Не смог найти такого пользователя в боте."
 
-        chat_type = getattr(chat, "type", None)
-        if chat_type != "private":
-            return None, None, "По username можно указать только пользователя."
-
-        target_id = int(chat.id)
-        if not repo.has_private_user(target_id):
-            return None, None, "Не смог найти такого пользователя в боте."
-        display_name = (getattr(chat, "full_name", "") or "").strip() or candidate
+        target_id = int(private_user["user_id"])
+        display_name = str(private_user.get("display_name", "") or candidate)
         return target_id, display_name, None
 
     try:
@@ -1817,7 +1828,7 @@ async def handle_ticket_adjustment_command(message: Message, *, action: str) -> 
 
     parts = (message.text or "").strip().split(maxsplit=2)
     command_name = parts[0].lower() if parts else ""
-    usage = f"Использование: {command_name} <число> [@username|ID] или ответом на сообщение."
+    usage = ticket_command_usage_text(command_name)
 
     if len(parts) < 2:
         await message.reply(usage)
@@ -3471,7 +3482,11 @@ async def cmd_start(message: Message, command: CommandObject) -> None:
     keyboard = private_main_menu_keyboard()
     if message.chat.type == "private":
         nickname = user_nickname(message.from_user)
-        is_private_first_visit = repo.touch_private_user(message.from_user.id, nickname)
+        is_private_first_visit = repo.touch_private_user(
+            message.from_user.id,
+            nickname,
+            message.from_user.username,
+        )
 
     if message.chat.type == "private" and command.args and command.args.startswith("join_"):
         if is_private_first_visit:
@@ -4157,6 +4172,22 @@ async def on_private_ticket_take_command(message: Message) -> None:
 @router.message(F.chat.type == "private", F.text.regexp(r"(?i)^!начислить\b"))
 async def on_private_ticket_admin_grant_command(message: Message) -> None:
     await handle_ticket_adjustment_command(message, action="grant")
+
+
+@router.message(F.chat.type.in_({"group", "supergroup"}), F.text.regexp(r"(?i)^!(перед\S*|забр\S*|начис\S*)"))
+async def on_ticket_command_hint(message: Message) -> None:
+    hint_text = ticket_command_hint_text(message.text)
+    if hint_text is None:
+        return
+    await message.reply(hint_text)
+
+
+@router.message(F.chat.type == "private", F.text.regexp(r"(?i)^!(перед\S*|забр\S*|начис\S*)"))
+async def on_private_ticket_command_hint(message: Message) -> None:
+    hint_text = ticket_command_hint_text(message.text)
+    if hint_text is None:
+        return
+    await message.reply(hint_text)
 
 
 @router.callback_query(F.data.startswith("trial:"))
