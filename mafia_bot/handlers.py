@@ -3485,7 +3485,7 @@ async def maybe_finish_phase_early(bot: Bot, room) -> None:
 
 def mafia_allies_text(room) -> str:
     allies = [player for player in room.players.values() if player.role in {ROLE_DON, ROLE_MAFIA}]
-    if not allies:
+    if len(allies) <= 1:
         return ""
 
     lines = ["", "<b>Запомни своих союзников:</b>"]
