@@ -1234,11 +1234,19 @@ def format_player_stats_text(stats: dict) -> str:
     tickets = int(stats.get("tickets", 0))
     last_role = str(stats.get("last_role", "") or "-")
     name = str(stats.get("display_name", "Игрок"))
+    first_seen_at = str(stats.get("first_seen_at", "") or "")
     total_special_games = mafia_games + maniac_games + civilian_games
+    registered_at_text = "-"
+    if first_seen_at:
+        try:
+            registered_at_text = datetime.fromisoformat(first_seen_at).strftime("%d.%m.%Y %H:%M")
+        except ValueError:
+            registered_at_text = first_seen_at
 
     return (
         "<b>Твоя статистика</b>\n\n"
         f"👤 Игрок: <b>{escape(name)}</b>\n\n"
+        f"🕒 Первая регистрация в боте: <b>{registered_at_text}</b>\n\n"
         f"🎮 Всего партий: <b>{games}</b>\n"
         f"🏆 Побед: <b>{wins}</b>\n"
         f"💀 Поражений: <b>{losses}</b>\n\n"

@@ -364,25 +364,27 @@ class GameStateRepository:
             row = conn.execute(
                 """
                 SELECT
-                    user_id,
-                    display_name,
-                    games_played,
-                    wins,
-                    losses,
-                    survived_games,
-                    suicide_personal_wins,
-                    mafia_games,
-                    maniac_games,
-                    civilian_games,
-                    money,
-                    tickets,
-                    buff_documents,
-                    buff_shield,
-                    buff_active_role,
-                    last_role,
-                    updated_at
-                FROM player_stats
-                WHERE user_id = ?
+                    ps.user_id,
+                    ps.display_name,
+                    ps.games_played,
+                    ps.wins,
+                    ps.losses,
+                    ps.survived_games,
+                    ps.suicide_personal_wins,
+                    ps.mafia_games,
+                    ps.maniac_games,
+                    ps.civilian_games,
+                    ps.money,
+                    ps.tickets,
+                    ps.buff_documents,
+                    ps.buff_shield,
+                    ps.buff_active_role,
+                    ps.last_role,
+                    ps.updated_at,
+                    pu.first_seen_at
+                FROM player_stats ps
+                LEFT JOIN private_users pu ON pu.user_id = ps.user_id
+                WHERE ps.user_id = ?
                 """,
                 (user_id,),
             ).fetchone()
