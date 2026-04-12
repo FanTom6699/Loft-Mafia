@@ -90,6 +90,23 @@ MUTE_SLEEPING_PLAYERS = True
 MUTE_NON_PLAYERS = True
 LEAVE_RESTRICTION_SECONDS = 0
 
+
+def read_user_id_set(name: str) -> set[int]:
+    raw = os.getenv(name, "")
+    values: set[int] = set()
+    for item in raw.split(","):
+        candidate = item.strip()
+        if not candidate:
+            continue
+        try:
+            values.add(int(candidate))
+        except ValueError:
+            continue
+    return values
+
+
+TICKET_MANAGER_USER_IDS = {OWNER_USER_ID, *read_user_id_set("TICKET_MANAGER_USER_IDS")}
+
 SETTINGS_ROLE_OPTIONS = [
     ROLE_COMMISSAR,
     ROLE_DOCTOR,
@@ -1725,6 +1742,154 @@ def player_display_name(player) -> str:
 def player_profile_link(player) -> str:
     safe_name = escape(player_display_name(player))
     return f"<a href=\"tg://user?id={player.user_id}\">{safe_name}</a>"
+
+
+def user_profile_link_by_id(user_id: int, display_name: str) -> str:
+    safe_name = escape((display_name or "").strip() or f"Игрок {user_id}")
+    return f"<a href=\"tg://user?id={user_id}\">{safe_name}</a>"
+
+
+def is_ticket_manager_user_id(user_id: int) -> bool:
+    return user_id in TICKET_MANAGER_USER_IDS
+
+
+async def resolve_ticket_command_target(message: Message, raw_target: str | None) -> tuple[int | None, str | None, str | None]:
+    replied = message.reply_to_message
+    if replied is not None and replied.from_user is not None and not replied.from_user.is_bot:
+        target_user = replied.from_user
+        if not repo.has_private_user(target_user.id):
+            return None, None, "Не смог найти такого пользователя в боте."
+        return target_user.id, user_nickname(target_user), None
+
+    candidate = (raw_target or "").strip()
+    if not candidate:
+        return None, None, "Укажи пользователя через ответ на сообщение, @username или ID."
+
+    if candidate.startswith("@"):
+        try:
+            chat = await message.bot.get_chat(candidate)
+        except Exception:
+            return None, None, "Не смог найти такого пользователя в боте."
+
+        chat_type = getattr(chat, "type", None)
+        if chat_type != "private":
+            return None, None, "По username можно указать только пользователя."
+
+        target_id = int(chat.id)
+        if not repo.has_private_user(target_id):
+            return None, None, "Не смог найти такого пользователя в боте."
+        display_name = (getattr(chat, "full_name", "") or "").strip() or candidate
+        return target_id, display_name, None
+
+    try:
+        target_id = int(candidate)
+    except ValueError:
+        return None, None, "Некорректный пользователь. Используй reply, @username или ID."
+
+    try:
+        if message.chat.type in {"group", "supergroup"}:
+            member = await message.bot.get_chat_member(message.chat.id, target_id)
+            target_user = member.user
+            if target_user.is_bot:
+                return None, None, "Нельзя использовать команду для бота."
+            if not repo.has_private_user(target_id):
+                return None, None, "Не смог найти такого пользователя в боте."
+            return target_id, user_nickname(target_user), None
+    except Exception:
+        pass
+
+    if not repo.has_private_user(target_id):
+        return None, None, "Не смог найти такого пользователя в боте."
+
+    stats = repo.get_player_stats(target_id)
+    if stats is not None:
+        display_name = str(stats.get("display_name", "") or f"Игрок {target_id}")
+        return target_id, display_name, None
+
+    return target_id, f"Игрок {target_id}", None
+
+
+async def handle_ticket_adjustment_command(message: Message, *, action: str) -> None:
+    if message.from_user is None:
+        return
+    if action in {"take", "grant"} and not is_ticket_manager_user_id(message.from_user.id):
+        return
+
+    parts = (message.text or "").strip().split(maxsplit=2)
+    command_name = parts[0].lower() if parts else ""
+    usage = f"Использование: {command_name} <число> [@username|ID] или ответом на сообщение."
+
+    if len(parts) < 2:
+        await message.reply(usage)
+        return
+
+    try:
+        amount = int(parts[1])
+    except ValueError:
+        await message.reply("Число билетиков должно быть целым числом.")
+        return
+
+    if amount <= 0:
+        await message.reply("Число билетиков должно быть больше нуля.")
+        return
+
+    target_id, target_name, error_text = await resolve_ticket_command_target(
+        message,
+        parts[2] if len(parts) > 2 else None,
+    )
+    if error_text is not None:
+        await message.reply(error_text)
+        return
+    if target_id is None or target_name is None:
+        await message.reply("Не удалось определить пользователя.")
+        return
+
+    if action == "transfer":
+        ok, info, stats = repo.transfer_player_tickets(
+            message.from_user.id,
+            user_nickname(message.from_user),
+            target_id,
+            target_name,
+            amount,
+        )
+    else:
+        delta = amount if action == "grant" else -amount
+        ok, info, stats = repo.adjust_player_tickets(target_id, target_name, delta)
+    if not ok:
+        await message.reply(info)
+        return
+
+    target_mark = user_profile_link_by_id(target_id, target_name)
+    if action == "transfer":
+        sender_mark = user_profile_link_by_id(message.from_user.id, user_nickname(message.from_user))
+        try:
+            await message.bot.send_message(
+                target_id,
+                f"{sender_mark} вам передал 🎟 {amount}.",
+                parse_mode="HTML",
+            )
+        except Exception:
+            pass
+        response_text = f"{target_mark} получил 🎟 {amount}."
+    elif action == "grant":
+        try:
+            await message.bot.send_message(
+                target_id,
+                f"Администратор начислил вам 🎟 {amount}.",
+            )
+        except Exception:
+            pass
+        response_text = f"Администратор начислил {target_mark} 🎟 {amount}."
+    else:
+        try:
+            await message.bot.send_message(
+                target_id,
+                f"Администрация забрала у вас 🎟 {amount}.",
+            )
+        except Exception:
+            pass
+        response_text = f"Администрация забрала у {target_mark} 🎟 {amount}."
+    await message.reply(response_text, parse_mode="HTML")
 
 
 async def registration_join_link(message: Message, chat_id: int) -> str:
@@ -3964,6 +4129,36 @@ async def cmd_id(message: Message) -> None:
     await message.answer("Не удалось определить ID.")
 
 
+@router.message(F.chat.type.in_({"group", "supergroup"}), F.text.regexp(r"(?i)^!передать\b"))
+async def on_ticket_grant_command(message: Message) -> None:
+    await handle_ticket_adjustment_command(message, action="transfer")
+
+
+@router.message(F.chat.type.in_({"group", "supergroup"}), F.text.regexp(r"(?i)^!забрать\b"))
+async def on_ticket_take_command(message: Message) -> None:
+    await handle_ticket_adjustment_command(message, action="take")
+
+
+@router.message(F.chat.type.in_({"group", "supergroup"}), F.text.regexp(r"(?i)^!начислить\b"))
+async def on_ticket_admin_grant_command(message: Message) -> None:
+    await handle_ticket_adjustment_command(message, action="grant")
+
+
+@router.message(F.chat.type == "private", F.text.regexp(r"(?i)^!передать\b"))
+async def on_private_ticket_grant_command(message: Message) -> None:
+    await handle_ticket_adjustment_command(message, action="transfer")
+
+
+@router.message(F.chat.type == "private", F.text.regexp(r"(?i)^!забрать\b"))
+async def on_private_ticket_take_command(message: Message) -> None:
+    await handle_ticket_adjustment_command(message, action="take")
+
+
+@router.message(F.chat.type == "private", F.text.regexp(r"(?i)^!начислить\b"))
+async def on_private_ticket_admin_grant_command(message: Message) -> None:
+    await handle_ticket_adjustment_command(message, action="grant")
+
+
 @router.callback_query(F.data.startswith("trial:"))
 async def on_trial_callback(callback: CallbackQuery) -> None:
     try:
@@ -5045,8 +5240,12 @@ async def enforce_group_game_rules(message: Message) -> None:
     if message.from_user is None or message.from_user.is_bot:
         return
 
+    lowered_text = (message.text or "").strip().lower()
+    if lowered_text.startswith("!передать") or lowered_text.startswith("!забрать") or lowered_text.startswith("!начислить"):
+        return
+
     if message.text and message.text.startswith("!"):
-        if await is_group_admin(message.bot, message.chat.id, message.from_user.id):
+        if await is_group_admin(message.bot, message.chat.id, message.from_user.id) or is_ticket_manager_user_id(message.from_user.id):
             return
 
     if is_user_blocked(message.chat.id, message.from_user.id):

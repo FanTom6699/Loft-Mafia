@@ -467,6 +467,103 @@ class GameStateRepository:
             currency_label="денег",
         )
 
+    def adjust_player_currency(
+        self,
+        user_id: int,
+        display_name: str,
+        *,
+        currency_column: str,
+        delta: int,
+        insufficient_label: str,
+    ) -> tuple[bool, str, dict | None]:
+        allowed_currency_columns = {"money", "tickets"}
+        if currency_column not in allowed_currency_columns:
+            return False, "Некорректное изменение баланса.", self.get_player_stats(user_id)
+
+        now = datetime.now().isoformat()
+        with sqlite3.connect(self.db_path) as conn:
+            self._ensure_player_stats_row(conn, user_id, display_name)
+            row = conn.execute(
+                f"SELECT {currency_column} FROM player_stats WHERE user_id = ?",
+                (user_id,),
+            ).fetchone()
+            balance = int(row[0]) if row is not None else 0
+            updated_balance = balance + int(delta)
+            if updated_balance < 0:
+                return False, f"Не хватает {insufficient_label}.", self.get_player_stats(user_id)
+
+            conn.execute(
+                f"""
+                UPDATE player_stats
+                SET display_name = ?,
+                    {currency_column} = ?,
+                    updated_at = ?
+                WHERE user_id = ?
+                """,
+                (display_name, updated_balance, now, user_id),
+            )
+            conn.commit()
+
+        return True, "Баланс обновлен.", self.get_player_stats(user_id)
+
+    def adjust_player_tickets(self, user_id: int, display_name: str, delta: int) -> tuple[bool, str, dict | None]:
+        return self.adjust_player_currency(
+            user_id,
+            display_name,
+            currency_column="tickets",
+            delta=delta,
+            insufficient_label="билетиков",
+        )
+
+    def transfer_player_tickets(
+        self,
+        sender_user_id: int,
+        sender_display_name: str,
+        recipient_user_id: int,
+        recipient_display_name: str,
+        amount: int,
+    ) -> tuple[bool, str, dict | None]:
+        transfer_amount = int(amount)
+        if transfer_amount <= 0:
+            return False, "Число билетиков должно быть больше нуля.", self.get_player_stats(recipient_user_id)
+
+        now = datetime.now().isoformat()
+        with sqlite3.connect(self.db_path) as conn:
+            self._ensure_player_stats_row(conn, sender_user_id, sender_display_name)
+            self._ensure_player_stats_row(conn, recipient_user_id, recipient_display_name)
+
+            row = conn.execute(
+                "SELECT tickets FROM player_stats WHERE user_id = ?",
+                (sender_user_id,),
+            ).fetchone()
+            sender_balance = int(row[0]) if row is not None else 0
+            if sender_balance < transfer_amount:
+                return False, "Не хватает билетиков.", self.get_player_stats(recipient_user_id)
+
+            conn.execute(
+                """
+                UPDATE player_stats
+                SET display_name = ?,
+                    tickets = tickets - ?,
+                    updated_at = ?
+                WHERE user_id = ?
+                """,
+                (sender_display_name, transfer_amount, now, sender_user_id),
+            )
+            conn.execute(
+                """
+                UPDATE player_stats
+                SET display_name = ?,
+                    tickets = tickets + ?,
+                    updated_at = ?
+                WHERE user_id = ?
+                """,
+                (recipient_display_name, transfer_amount, now, recipient_user_id),
+            )
+            conn.commit()
+
+        return True, "Баланс обновлен.", self.get_player_stats(recipient_user_id)
+
     def consume_buff(self, user_id: int, *, inventory_column: str) -> bool:
         allowed_inventory_columns = {"buff_documents", "buff_shield", "buff_active_role"}
         if inventory_column not in allowed_inventory_columns:
