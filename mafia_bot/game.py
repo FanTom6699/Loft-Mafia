@@ -313,6 +313,7 @@ class GameRoom:
     day_stage: str | None = None
     day_votes: dict[int, int] = field(default_factory=dict)
     trial_candidate_id: int | None = None
+    trial_vote_message_id: int | None = None
     trial_votes: dict[int, bool] = field(default_factory=dict)
     night_kill_sources: dict[int, list[str]] = field(default_factory=dict)
     day_silenced_user_id: int | None = None
@@ -384,6 +385,7 @@ class GameRoom:
         self.announced_night_roles.clear()
         self.day_votes.clear()
         self.trial_candidate_id = None
+        self.trial_vote_message_id = None
         self.trial_votes.clear()
         self.night_kill_sources.clear()
         self.day_silenced_user_id = None
@@ -450,6 +452,7 @@ class GameRoom:
         self.last_don_successor_id = None
         self.day_votes.clear()
         self.trial_candidate_id = None
+        self.trial_vote_message_id = None
         self.trial_votes.clear()
         self.night_kill_sources.clear()
         self.day_silenced_user_id = None
@@ -898,6 +901,7 @@ class GameRoom:
 
         self.day_stage = DAY_STAGE_TRIAL
         self.trial_candidate_id = candidate_user_id
+        self.trial_vote_message_id = None
         self.trial_votes.clear()
         return True, "Этап голосования за/против запущен."
 
@@ -964,6 +968,7 @@ class GameRoom:
         self.day_stage = None
         self.day_votes.clear()
         self.trial_candidate_id = None
+        self.trial_vote_message_id = None
         self.trial_votes.clear()
         self.night_votes.clear()
         self.night_skipped_user_ids.clear()
@@ -1679,6 +1684,7 @@ class GameRoom:
         self.day_stage = DAY_STAGE_DISCUSSION
         self.day_votes.clear()
         self.trial_candidate_id = None
+        self.trial_vote_message_id = None
         self.trial_votes.clear()
         self.doctor_target_id = None
         self.commissar_action_mode = None
@@ -1834,6 +1840,7 @@ class GameRoom:
         self.mafia_vote_locked = False
         self.mafia_target_announced = False
         self.announced_night_roles.clear()
+        self.trial_vote_message_id = None
         self.doctor_target_id = None
         self.commissar_target_id = None
         self.advocate_target_id = None

@@ -2802,14 +2802,43 @@ async def push_trial_vote_menus(bot: Bot, room, candidate) -> None:
     print(f"[TRIAL] push_trial_vote_menus: candidate={candidate_name}, chat_id={room.chat_id}")
     yes_count, no_count = room.trial_vote_counts()
     try:
-        await bot.send_message(
+        sent = await bot.send_message(
             room.chat_id,
             trial_vote_prompt_text(room, candidate),
             reply_markup=trial_vote_keyboard(room.chat_id, yes_count, no_count),
             parse_mode="HTML",
         )
+        room.trial_vote_message_id = sent.message_id
+        persist_room(room)
     except Exception as e:
         print(f"[ERROR] push_trial_vote_menus: chat_id={room.chat_id}, error={e!r}")
+
+
+async def finish_trial_vote_message(bot: Bot, room, candidate, yes_count: int, no_count: int) -> None:
+    message_id = room.trial_vote_message_id
+    if message_id is None:
+        return
+
+    completion_text = f"{trial_vote_prompt_text(room, candidate)}\n\nГолосование завершено"
+    try:
+        await bot.edit_message_text(
+            completion_text,
+            chat_id=room.chat_id,
+            message_id=message_id,
+            parse_mode="HTML",
+            reply_markup=None,
+        )
+    except Exception:
+        try:
+            await bot.edit_message_reply_markup(
+                chat_id=room.chat_id,
+                message_id=message_id,
+                reply_markup=None,
+            )
+        except Exception:
+            pass
+    room.trial_vote_message_id = None
+    persist_room(room)
 
 
 async def send_mafia_private_update(room, bot, text: str) -> None:
@@ -2841,7 +2870,7 @@ async def announce_don_transfer(room, bot: Bot, don_successor_id: int | None) ->
     don_name = room_player_mark(room, new_don)
     await bot.send_message(
         room.chat_id,
-        f"{don_name} унаследовал роль <b>🤵🏻 Дон</b>",
+        "Мафия унаследовала роль <b>🤵🏻 Дон</b>",
         parse_mode="HTML",
     )
     try:
@@ -3221,6 +3250,8 @@ async def process_day_end(bot: Bot, chat_id: int, timer_reason: str | None = Non
 
         if room.day_stage == DAY_STAGE_TRIAL:
             yes_count, no_count = room.trial_vote_counts()
+            candidate = room.get_player(room.trial_candidate_id) if room.trial_candidate_id is not None else None
+            await finish_trial_vote_message(bot, room, candidate, yes_count, no_count)
             print(f"[PHASE] process_day_end: resolving trial for chat_id={chat_id}, yes_count={yes_count}, no_count={no_count}, votes={room.trial_votes}")
             (
                 ok,
@@ -4304,14 +4335,7 @@ async def on_trial_callback(callback: CallbackQuery) -> None:
                 f"chat_id={room.chat_id}, eligible={len(eligible_voter_ids)}, received={len(received_vote_ids)}, "
                 f"yes={yes_count}, no={no_count}"
             )
-            completion_text = f"{trial_vote_prompt_text(room, candidate)}\n\nГолосование завершено"
-            try:
-                await callback.message.edit_text(completion_text, parse_mode="HTML")
-            except Exception:
-                try:
-                    await callback.message.edit_reply_markup(reply_markup=None)
-                except Exception:
-                    pass
+            await finish_trial_vote_message(callback.bot, room, candidate, yes_count, no_count)
             await process_day_end(callback.bot, room.chat_id, timer_reason=None)
         else:
             await maybe_finish_phase_early(callback.bot, room)
@@ -4372,9 +4396,14 @@ async def on_action_callback(callback: CallbackQuery) -> None:
     async def announce_night_role_once(role_name: str, target=None, *, variant: str = "default") -> None:
         if room.phase != "night":
             return
-        if not room.mark_night_role_announced(role_name):
+        announcement_role = ROLE_MAFIA if role_name in MAFIA_ROLES else role_name
+        if announcement_role == ROLE_MAFIA and room.mafia_target_announced:
             return
-        announcement_text = night_role_announcement_text(room, role_name, target, variant=variant)
+        if not room.mark_night_role_announced(announcement_role):
+            return
+        if announcement_role == ROLE_MAFIA:
+            room.mafia_target_announced = True
+        announcement_text = night_role_announcement_text(room, announcement_role, target, variant=variant)
         await safe_send_message(callback.bot, room.chat_id, announcement_text, parse_mode="HTML")
 
     if action == "kill":
@@ -4386,14 +4415,7 @@ async def on_action_callback(callback: CallbackQuery) -> None:
         if ok:
             actor = room.get_player(callback.from_user.id)
             target = room.get_player(target_id)
-            if not room.mafia_target_announced:
-                await safe_send_message(
-                    callback.bot,
-                    room.chat_id,
-                    night_role_announcement_text(room, ROLE_MAFIA),
-                    parse_mode="HTML",
-                )
-                room.mafia_target_announced = True
+            await announce_night_role_once(ROLE_MAFIA)
             if actor is not None and target is not None:
                 role_mark = role_mark_text(actor.role)
                 await send_mafia_private_update(

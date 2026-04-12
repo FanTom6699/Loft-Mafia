@@ -130,6 +130,7 @@ class GameStateRepository:
             "day_stage": room.day_stage,
             "day_votes": room.day_votes,
             "trial_candidate_id": room.trial_candidate_id,
+            "trial_vote_message_id": room.trial_vote_message_id,
             "trial_votes": room.trial_votes,
             "night_kill_sources": room.night_kill_sources,
             "day_silenced_user_id": room.day_silenced_user_id,
@@ -208,6 +209,7 @@ class GameStateRepository:
         room.day_stage = payload.get("day_stage")
         room.day_votes = {int(k): int(v) for k, v in payload.get("day_votes", {}).items()}
         room.trial_candidate_id = payload.get("trial_candidate_id")
+        room.trial_vote_message_id = payload.get("trial_vote_message_id")
         room.trial_votes = {int(k): bool(v) for k, v in payload.get("trial_votes", {}).items()}
 
         room.night_kill_sources = {
