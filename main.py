@@ -34,6 +34,7 @@ async def main() -> None:
         level=logging.INFO,
         format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
     )
+    print("🔥 Я С ЭТОГО СЕРВЕРА")
 
     settings = get_settings()
     bot = Bot(
