@@ -21,6 +21,7 @@ from mafia_bot.game import (
     GAME_MODE_INVISIBLE,
     GAME_MODE_TITLES,
     MAFIA_ROLES,
+    MAX_PLAYERS,
     MIN_PLAYERS,
     PHASE_DAY,
     PHASE_FINISHED,
@@ -1090,6 +1091,15 @@ async def launch_game_from_registration(bot: Bot, room, chat_id: int, chat_title
         await send_role_cards()
     except Exception as e:
         print(f"[ERROR] send_role_cards: {e!r}")
+
+
+async def maybe_launch_full_lobby(bot: Bot, room, chat_id: int, chat_title: str | None) -> bool:
+    if room.started or not room.registration_open:
+        return False
+    if len(room.players) < MAX_PLAYERS:
+        return False
+    await launch_game_from_registration(bot, room, chat_id, chat_title)
+    return True
 
     # Wait 2 seconds before announcing night; roles are already sent at this point.
     await asyncio.sleep(2)
@@ -3564,6 +3574,8 @@ async def cmd_start(message: Message, command: CommandObject) -> None:
                 f"Ты присоединился к игре в <b>{room.chat_title or room.chat_id}</b>."
             )
         )
+        if await maybe_launch_full_lobby(message.bot, room, chat_id, room.chat_title):
+            return
         await refresh_registration_post(message, room)
         return
 
@@ -4052,8 +4064,10 @@ async def on_registration_action(callback: CallbackQuery) -> None:
             await callback.answer(info, show_alert=True)
             return
         persist_room(room)
-        await refresh_registration_post(callback.message, room)
         await callback.answer("Ты зарегистрирован")
+        if await maybe_launch_full_lobby(callback.bot, room, chat_id, callback.message.chat.title):
+            return
+        await refresh_registration_post(callback.message, room)
         return
 
     if action == "leave":

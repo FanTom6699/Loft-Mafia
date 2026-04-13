@@ -5,6 +5,7 @@ from html import escape
 
 
 MIN_PLAYERS = 4
+MAX_PLAYERS = 20
 PHASE_LOBBY = "lobby"
 PHASE_NIGHT = "night"
 PHASE_DAY = "day"
@@ -363,6 +364,8 @@ class GameRoom:
         if user_id in self.players:
             self.players[user_id].full_name = full_name
             return False, "Ты уже в лобби."
+        if len(self.players) >= MAX_PLAYERS:
+            return False, "Лобби уже заполнено."
         self.players[user_id] = Player(user_id=user_id, full_name=full_name)
         return True, "Игрок добавлен."
 

@@ -29,12 +29,7 @@ async def setup_bot_commands(bot: Bot) -> None:
     await bot.set_my_commands(private_commands, scope=BotCommandScopeAllPrivateChats())
 
 
-async def main() -> None:
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
-    )
-
+async def start_bot() -> None:
     settings = get_settings()
     bot = Bot(
         token=settings.bot_token,
@@ -43,10 +38,28 @@ async def main() -> None:
     dp = Dispatcher()
     dp.include_router(router)
 
-    await setup_bot_commands(bot)
-    await restore_runtime_state(bot)
+    try:
+        await setup_bot_commands(bot)
+        await restore_runtime_state(bot)
 
-    await dp.start_polling(bot)
+        await dp.start_polling(bot)
+    finally:
+        await bot.session.close()
+
+
+async def main() -> None:
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
+    )
+
+    while True:
+        try:
+            await start_bot()
+            return
+        except Exception:
+            logging.exception("CRASH:")
+            await asyncio.sleep(5)
 
 
 if __name__ == "__main__":
