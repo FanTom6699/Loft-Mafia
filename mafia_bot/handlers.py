@@ -4969,7 +4969,7 @@ async def on_private_settings_callback(callback: CallbackQuery) -> None:
         nickname = user_nickname(callback.from_user)
         await show_settings_screen(
             f"<b>С возвращением, {nickname}!</b>\n\nВыбери нужный раздел кнопками ниже.",
-            private_main_menu_keyboard(),
+            private_main_menu_keyboard(callback.from_user.id),
         )
         await safe_answer()
         return
