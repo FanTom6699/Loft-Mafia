@@ -1,7 +1,7 @@
 import json
 import os
 import sqlite3
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from mafia_bot.game import MAFIA_ROLES, ROLE_MANIAC, GameRoom, Player
 
@@ -56,6 +56,32 @@ class GameStateRepository:
                     last_role TEXT NOT NULL DEFAULT '',
                     updated_at TEXT NOT NULL
                 )
+                """
+            )
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS player_game_results (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id INTEGER NOT NULL,
+                    display_name TEXT NOT NULL,
+                    won INTEGER NOT NULL DEFAULT 0,
+                    survived INTEGER NOT NULL DEFAULT 0,
+                    role TEXT NOT NULL DEFAULT '',
+                    winner_team TEXT NOT NULL DEFAULT '',
+                    finished_at TEXT NOT NULL
+                )
+                """
+            )
+            conn.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_player_game_results_finished_at
+                ON player_game_results(finished_at)
+                """
+            )
+            conn.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_player_game_results_user_finished_at
+                ON player_game_results(user_id, finished_at)
                 """
             )
             self._ensure_column(conn, "player_stats", "money", "INTEGER NOT NULL DEFAULT 0")
@@ -358,7 +384,102 @@ class GameStateRepository:
                         now,
                     ),
                 )
+                conn.execute(
+                    """
+                    INSERT INTO player_game_results(
+                        user_id,
+                        display_name,
+                        won,
+                        survived,
+                        role,
+                        winner_team,
+                        finished_at
+                    )
+                    VALUES(?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        player.user_id,
+                        player.full_name,
+                        1 if won else 0,
+                        survived,
+                        player.role,
+                        room.winner_team,
+                        now,
+                    ),
+                )
             conn.commit()
+
+    @staticmethod
+    def _top_period_since(period: str) -> str | None:
+        now = datetime.now()
+        if period == "day":
+            return (now - timedelta(days=1)).isoformat()
+        if period == "week":
+            return (now - timedelta(days=7)).isoformat()
+        if period == "month":
+            return (now - timedelta(days=30)).isoformat()
+        return None
+
+    def get_top_players(self, period: str = "all", limit: int = 10, metric: str = "wins") -> list[dict]:
+        normalized_period = period if period in {"day", "week", "month", "all"} else "all"
+        normalized_metric = metric if metric in {"wins", "tickets"} else "wins"
+        with sqlite3.connect(self.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            if normalized_metric == "tickets":
+                rows = conn.execute(
+                    """
+                    SELECT
+                        user_id,
+                        display_name,
+                        wins,
+                        tickets
+                    FROM player_stats
+                    WHERE tickets > 0
+                    ORDER BY tickets DESC, wins DESC, user_id ASC
+                    LIMIT ?
+                    """,
+                    (limit,),
+                ).fetchall()
+            elif normalized_period == "all":
+                rows = conn.execute(
+                    """
+                    SELECT
+                        user_id,
+                        display_name,
+                        games_played,
+                        wins,
+                        tickets,
+                        losses,
+                        survived_games
+                    FROM player_stats
+                    WHERE games_played > 0
+                    ORDER BY wins DESC, games_played DESC, survived_games DESC, user_id ASC
+                    LIMIT ?
+                    """,
+                    (limit,),
+                ).fetchall()
+            else:
+                since = self._top_period_since(normalized_period)
+                rows = conn.execute(
+                    """
+                    SELECT
+                        pgr.user_id,
+                        MAX(pgr.display_name) AS display_name,
+                        COUNT(*) AS games_played,
+                        SUM(won) AS wins,
+                        MAX(ps.tickets) AS tickets,
+                        SUM(CASE WHEN won = 0 THEN 1 ELSE 0 END) AS losses,
+                        SUM(survived) AS survived_games
+                    FROM player_game_results pgr
+                    LEFT JOIN player_stats ps ON ps.user_id = pgr.user_id
+                    WHERE pgr.finished_at >= ?
+                    GROUP BY pgr.user_id
+                    ORDER BY wins DESC, games_played DESC, survived_games DESC, pgr.user_id ASC
+                    LIMIT ?
+                    """,
+                    (since, limit),
+                ).fetchall()
+        return [dict(row) for row in rows]
 
     def get_player_stats(self, user_id: int) -> dict | None:
         with sqlite3.connect(self.db_path) as conn:

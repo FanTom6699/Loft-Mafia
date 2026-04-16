@@ -18,11 +18,13 @@ async def setup_bot_commands(bot: Bot) -> None:
         BotCommand(command="extend", description="Продлить регистрацию"),
         BotCommand(command="start", description="Завершить регистрацию и начать игру"),
         BotCommand(command="stop", description="Отменить регистрацию / остановить игру"),
+        BotCommand(command="top", description="Топ игроков"),
     ]
     private_commands = [
         BotCommand(command="start", description="Главное меню"),
         BotCommand(command="roles", description="Список ролей"),
         BotCommand(command="stats", description="Твоя статистика"),
+        BotCommand(command="top", description="Топ игроков"),
     ]
 
     await bot.set_my_commands(group_commands, scope=BotCommandScopeAllGroupChats())

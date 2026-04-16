@@ -1265,6 +1265,54 @@ def format_player_stats_text(stats: dict) -> str:
     )
 
 
+TOP_PERIOD_LABELS = {
+    "day": "Дневной",
+    "week": "Недельный",
+    "month": "Месячный",
+    "all": "За всё время",
+}
+
+def top_period_keyboard(selected_metric: str, selected_period: str) -> InlineKeyboardMarkup:
+    def button(period: str) -> InlineKeyboardButton:
+        prefix = "✅ " if selected_metric == "wins" and period == selected_period else ""
+        return InlineKeyboardButton(text=f"{prefix}{TOP_PERIOD_LABELS[period]}", callback_data=f"top:{selected_metric}:{period}")
+    ticket_prefix = "✅ " if selected_metric == "tickets" else ""
+
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [button("day"), button("week")],
+            [button("month"), button("all")],
+            [InlineKeyboardButton(text=f"{ticket_prefix}По билетикам", callback_data="top:tickets:all")],
+        ]
+    )
+
+
+def format_top_text(metric: str, period: str, rows: list[dict]) -> str:
+    period_name = TOP_PERIOD_LABELS.get(period, TOP_PERIOD_LABELS["all"])
+    metric_name = "По билетикам" if metric == "tickets" else "По победам"
+    lines = ["<b>🏆 Топ-10 игроков</b>", "", f"Рейтинг: <b>{metric_name}</b>", f"Период: <b>{period_name}</b>"]
+    if not rows:
+        lines.extend(["", "Пока нет данных для этого топа."])
+        return "\n".join(lines)
+
+    lines.append("")
+    for index, row in enumerate(rows, start=1):
+        user_id = int(row.get("user_id", 0))
+        display_name = str(row.get("display_name", "") or f"Игрок {user_id}")
+        player_mark = user_profile_link_by_id(user_id, display_name)
+        wins = int(row.get("wins", 0))
+        tickets = int(row.get("tickets", 0))
+        if metric == "tickets":
+            lines.append(f"{index}. {player_mark} — <b>{tickets}</b> 🎟")
+        else:
+            lines.append(f"{index}. {player_mark} — <b>{wins}</b> побед")
+
+    if metric == "tickets":
+        lines.extend(["", "<i>Для билетиков показывается общий текущий баланс.</i>"])
+
+    return "\n".join(lines)
+
+
 def format_endgame_currency_text(player, stats: dict, reward_awarded: bool) -> str:
     name = escape((player.full_name or "").strip() or f"Игрок {player.user_id}")
     money = int(stats.get("money", 0))
@@ -3655,6 +3703,62 @@ async def cmd_stats(message: Message) -> None:
     await message.answer(format_player_stats_text(stats))
 
 
+async def send_top_to_private(bot: Bot, user: User, metric: str = "wins", period: str = "all") -> bool:
+    nickname = user_nickname(user)
+    repo.touch_private_user(user.id, nickname, user.username)
+    top_rows = repo.get_top_players(period=period, limit=10, metric=metric)
+    try:
+        await bot.send_message(
+            user.id,
+            (
+                f"<b>С возвращением, {nickname}!</b>\n\n"
+                "Выбери нужный раздел кнопками ниже."
+            ),
+            reply_markup=private_main_menu_keyboard(user.id),
+        )
+        await bot.send_message(
+            user.id,
+            format_top_text(metric, period, top_rows),
+            reply_markup=top_period_keyboard(metric, period),
+            parse_mode="HTML",
+        )
+    except TelegramForbiddenError:
+        return False
+    return True
+
+
+@router.message(Command("top"))
+async def cmd_top(message: Message) -> None:
+    await cleanup_group_command_message(message)
+    metric = "wins"
+    period = "all"
+
+    if message.chat.type in {"group", "supergroup"} and message.from_user is not None:
+        room = storage.get_room(message.chat.id)
+        if room is not None and room.started and room.phase != PHASE_FINISHED:
+            sent = await send_top_to_private(message.bot, message.from_user, metric=metric, period=period)
+            if sent:
+                await message.answer("Во время игры топ отправлен в ЛС бота.")
+            else:
+                start_link = await bot_start_link(message.bot)
+                await message.answer(
+                    "Во время игры топ доступен только в ЛС бота. Напиши боту /start и попробуй снова.",
+                    reply_markup=InlineKeyboardMarkup(
+                        inline_keyboard=[
+                            [InlineKeyboardButton(text="Открыть бота", url=start_link)],
+                        ]
+                    ),
+                )
+            return
+
+    top_rows = repo.get_top_players(period=period, limit=10, metric=metric)
+    await message.answer(
+        format_top_text(metric, period, top_rows),
+        reply_markup=top_period_keyboard(metric, period),
+        parse_mode="HTML",
+    )
+
+
 @router.message(Command("profile"))
 async def cmd_profile(message: Message) -> None:
     await cleanup_group_command_message(message)
@@ -4921,6 +5025,54 @@ async def on_private_menu_callback(callback: CallbackQuery) -> None:
         await safe_answer(info, show_alert=True)
         return
     await safe_answer("Неизвестный пункт меню.", show_alert=True)
+
+
+@router.callback_query(F.data.startswith("top:"))
+async def on_top_callback(callback: CallbackQuery) -> None:
+    if callback.message is None:
+        return
+
+    if callback.message.chat.type in {"group", "supergroup"} and callback.from_user is not None:
+        room = storage.get_room(callback.message.chat.id)
+        if room is not None and room.started and room.phase != PHASE_FINISHED:
+            sent = await send_top_to_private(callback.message.bot, callback.from_user, metric="wins", period="all")
+            if sent:
+                await callback.answer("Во время игры топ отправлен в ЛС бота.", show_alert=True)
+            else:
+                await callback.answer("Во время игры топ доступен только в ЛС бота. Напиши боту /start.", show_alert=True)
+            return
+
+    parts = callback.data.split(":")
+    if len(parts) == 2:
+        metric = "wins"
+        period = parts[1]
+    elif len(parts) == 3:
+        _, metric, period = parts
+    else:
+        await callback.answer("Неизвестный топ.", show_alert=True)
+        return
+
+    if metric not in {"wins", "tickets"}:
+        await callback.answer("Неизвестный тип топа.", show_alert=True)
+        return
+    if period not in TOP_PERIOD_LABELS:
+        await callback.answer("Неизвестный период.", show_alert=True)
+        return
+
+    if metric == "tickets":
+        period = "all"
+
+    rows = repo.get_top_players(period=period, limit=10, metric=metric)
+    try:
+        await callback.message.edit_text(
+            format_top_text(metric, period, rows),
+            reply_markup=top_period_keyboard(metric, period),
+            parse_mode="HTML",
+        )
+    except TelegramBadRequest as e:
+        if "message is not modified" not in str(e):
+            raise
+    await callback.answer()
 
 
 @router.callback_query(F.data.startswith("psettings:"))
