@@ -392,7 +392,7 @@ class GameRoom:
         self.trial_votes.clear()
         self.night_kill_sources.clear()
         self.day_silenced_user_id = None
-        self.doctor_target_id = None
+        self.doctor_target_id = None        
         self.doctor_self_heal_used = False
         self.lucky_save_used = False
         self.commissar_action_mode = None

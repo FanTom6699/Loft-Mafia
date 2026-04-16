@@ -1272,17 +1272,31 @@ TOP_PERIOD_LABELS = {
     "all": "За всё время",
 }
 
-def top_period_keyboard(selected_metric: str, selected_period: str) -> InlineKeyboardMarkup:
+def top_period_keyboard(selected_metric: str, selected_period: str, owner_user_id: int | None = None) -> InlineKeyboardMarkup:
+    def callback_value(metric: str, period: str) -> str:
+        if owner_user_id is None:
+            return f"top:{metric}:{period}"
+        return f"top:{metric}:{period}:{owner_user_id}"
+
     def button(period: str) -> InlineKeyboardButton:
         prefix = "✅ " if selected_metric == "wins" and period == selected_period else ""
-        return InlineKeyboardButton(text=f"{prefix}{TOP_PERIOD_LABELS[period]}", callback_data=f"top:{selected_metric}:{period}")
+        metric_for_period = "wins" if selected_metric == "tickets" else selected_metric
+        return InlineKeyboardButton(
+            text=f"{prefix}{TOP_PERIOD_LABELS[period]}",
+            callback_data=callback_value(metric_for_period, period),
+        )
     ticket_prefix = "✅ " if selected_metric == "tickets" else ""
 
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [button("day"), button("week")],
             [button("month"), button("all")],
-            [InlineKeyboardButton(text=f"{ticket_prefix}По билетикам", callback_data="top:tickets:all")],
+            [
+                InlineKeyboardButton(
+                    text=f"{ticket_prefix}По билетикам",
+                    callback_data=callback_value("tickets", "all"),
+                )
+            ],
         ]
     )
 
@@ -1306,9 +1320,6 @@ def format_top_text(metric: str, period: str, rows: list[dict]) -> str:
             lines.append(f"{index}. {player_mark} — <b>{tickets}</b> 🎟")
         else:
             lines.append(f"{index}. {player_mark} — <b>{wins}</b> побед")
-
-    if metric == "tickets":
-        lines.extend(["", "<i>Для билетиков показывается общий текущий баланс.</i>"])
 
     return "\n".join(lines)
 
@@ -1803,13 +1814,25 @@ def player_display_name(player) -> str:
     return f"Игрок {player.user_id}"
 
 
+def normalize_link_display_name(name: str, fallback: str) -> str:
+    normalized = str(name or "")
+    normalized = normalized.replace("\r", " ").replace("\n", " ").replace("\t", " ")
+    # Remove common zero-width/control direction marks that can break link rendering.
+    for ch in ("\u200b", "\u200c", "\u200d", "\u200e", "\u200f", "\u202a", "\u202b", "\u202c", "\u202d", "\u202e", "\u2060", "\ufeff"):
+        normalized = normalized.replace(ch, "")
+    normalized = " ".join(normalized.split())
+    return normalized or fallback
+
+
 def player_profile_link(player) -> str:
-    safe_name = escape(player_display_name(player))
+    display_name = normalize_link_display_name(player_display_name(player), f"Игрок {player.user_id}")
+    safe_name = escape(display_name)
     return f"<a href=\"tg://user?id={player.user_id}\">{safe_name}</a>"
 
 
 def user_profile_link_by_id(user_id: int, display_name: str) -> str:
-    safe_name = escape((display_name or "").strip() or f"Игрок {user_id}")
+    normalized_name = normalize_link_display_name(display_name, f"Игрок {user_id}")
+    safe_name = escape(normalized_name)
     return f"<a href=\"tg://user?id={user_id}\">{safe_name}</a>"
 
 
@@ -3719,7 +3742,7 @@ async def send_top_to_private(bot: Bot, user: User, metric: str = "wins", period
         await bot.send_message(
             user.id,
             format_top_text(metric, period, top_rows),
-            reply_markup=top_period_keyboard(metric, period),
+            reply_markup=top_period_keyboard(metric, period, owner_user_id=user.id),
             parse_mode="HTML",
         )
     except TelegramForbiddenError:
@@ -3754,7 +3777,7 @@ async def cmd_top(message: Message) -> None:
     top_rows = repo.get_top_players(period=period, limit=10, metric=metric)
     await message.answer(
         format_top_text(metric, period, top_rows),
-        reply_markup=top_period_keyboard(metric, period),
+        reply_markup=top_period_keyboard(metric, period, owner_user_id=message.from_user.id if message.from_user is not None else None),
         parse_mode="HTML",
     )
 
@@ -5032,6 +5055,29 @@ async def on_top_callback(callback: CallbackQuery) -> None:
     if callback.message is None:
         return
 
+    parts = callback.data.split(":")
+    if len(parts) == 2:
+        metric = "wins"
+        period = parts[1]
+        owner_user_id = None
+    elif len(parts) == 3:
+        _, metric, period = parts
+        owner_user_id = None
+    elif len(parts) == 4:
+        _, metric, period, owner_raw = parts
+        try:
+            owner_user_id = int(owner_raw)
+        except ValueError:
+            await callback.answer("Неизвестный топ.", show_alert=True)
+            return
+    else:
+        await callback.answer("Неизвестный топ.", show_alert=True)
+        return
+
+    if owner_user_id is not None and callback.from_user is not None and callback.from_user.id != owner_user_id:
+        await callback.answer("Это меню не для тебя.")
+        return
+
     if callback.message.chat.type in {"group", "supergroup"} and callback.from_user is not None:
         room = storage.get_room(callback.message.chat.id)
         if room is not None and room.started and room.phase != PHASE_FINISHED:
@@ -5041,16 +5087,6 @@ async def on_top_callback(callback: CallbackQuery) -> None:
             else:
                 await callback.answer("Во время игры топ доступен только в ЛС бота. Напиши боту /start.", show_alert=True)
             return
-
-    parts = callback.data.split(":")
-    if len(parts) == 2:
-        metric = "wins"
-        period = parts[1]
-    elif len(parts) == 3:
-        _, metric, period = parts
-    else:
-        await callback.answer("Неизвестный топ.", show_alert=True)
-        return
 
     if metric not in {"wins", "tickets"}:
         await callback.answer("Неизвестный тип топа.", show_alert=True)
@@ -5064,9 +5100,12 @@ async def on_top_callback(callback: CallbackQuery) -> None:
 
     rows = repo.get_top_players(period=period, limit=10, metric=metric)
     try:
+        keyboard_owner_id = owner_user_id
+        if keyboard_owner_id is None and callback.from_user is not None:
+            keyboard_owner_id = callback.from_user.id
         await callback.message.edit_text(
             format_top_text(metric, period, rows),
-            reply_markup=top_period_keyboard(metric, period),
+            reply_markup=top_period_keyboard(metric, period, owner_user_id=keyboard_owner_id),
             parse_mode="HTML",
         )
     except TelegramBadRequest as e:
