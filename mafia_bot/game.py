@@ -267,8 +267,18 @@ class Player:
     alive: bool = True
 
 
+def normalize_link_display_name(name: str, fallback: str) -> str:
+    normalized = str(name or "")
+    normalized = normalized.replace("\r", " ").replace("\n", " ").replace("\t", " ")
+    for ch in ("\u200b", "\u200c", "\u200d", "\u200e", "\u200f", "\u202a", "\u202b", "\u202c", "\u202d", "\u202e", "\u2060", "\ufeff"):
+        normalized = normalized.replace(ch, "")
+    normalized = " ".join(normalized.split())
+    return normalized or fallback
+
+
 def player_link(player: Player) -> str:
-    safe_name = escape((player.full_name or "").strip() or f"Игрок {player.user_id}")
+    display_name = normalize_link_display_name(player.full_name, f"Игрок {player.user_id}")
+    safe_name = escape(display_name)
     return f"<a href=\"tg://user?id={player.user_id}\">{safe_name}</a>"
 
 
@@ -1904,7 +1914,7 @@ class GameRoom:
             seat_no = seat_positions.get(player.user_id)
             raw_name = (player.full_name or "").strip()
             fallback_name = f"Игрок {seat_no}" if seat_no is not None else f"Игрок {player.user_id}"
-            safe_name = escape(raw_name if raw_name else fallback_name)
+            safe_name = escape(normalize_link_display_name(raw_name, fallback_name))
             if seat_no is None:
                 lines.append(f"<a href=\"tg://user?id={player.user_id}\">{safe_name}</a>")
             else:

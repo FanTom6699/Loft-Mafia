@@ -814,7 +814,8 @@ def skip_turn_selected_text() -> str:
 
 def locked_choice_text(room, actor_user_id: int, selected_name: str, selected_user_id: int | None = None) -> str:
     prompt = build_action_prompt_text(room, actor_user_id)
-    safe_name = escape(selected_name)
+    normalized_name = normalize_link_display_name(selected_name, "цель")
+    safe_name = escape(normalized_name)
     selected_mark = safe_name
     if selected_user_id is not None and not invisible_mode_enabled(room):
         selected_mark = f"<a href=\"tg://user?id={selected_user_id}\">{safe_name}</a>"
@@ -1092,15 +1093,6 @@ async def launch_game_from_registration(bot: Bot, room, chat_id: int, chat_title
     except Exception as e:
         print(f"[ERROR] send_role_cards: {e!r}")
 
-
-async def maybe_launch_full_lobby(bot: Bot, room, chat_id: int, chat_title: str | None) -> bool:
-    if room.started or not room.registration_open:
-        return False
-    if len(room.players) < MAX_PLAYERS:
-        return False
-    await launch_game_from_registration(bot, room, chat_id, chat_title)
-    return True
-
     # Wait 2 seconds before announcing night; roles are already sent at this point.
     await asyncio.sleep(2)
 
@@ -1134,6 +1126,15 @@ async def maybe_launch_full_lobby(bot: Bot, room, chat_id: int, chat_title: str 
         await push_phase_action_menus(bot, room)
     except Exception as e:
         print(f"[ERROR] push_phase_action_menus: {e!r}")
+
+
+async def maybe_launch_full_lobby(bot: Bot, room, chat_id: int, chat_title: str | None) -> bool:
+    if room.started or not room.registration_open:
+        return False
+    if len(room.players) < MAX_PLAYERS:
+        return False
+    await launch_game_from_registration(bot, room, chat_id, chat_title)
+    return True
 
 
 async def process_registration_timeout(bot: Bot, chat_id: int) -> None:
@@ -2760,7 +2761,8 @@ def night_status_text(room) -> str:
         seat_no = seat_positions.get(player.user_id)
         raw_name = (player.full_name or "").strip()
         fallback_name = f"Игрок {seat_no}" if seat_no is not None else f"Игрок {player.user_id}"
-        safe_name = escape(raw_name if raw_name else fallback_name)
+        normalized_name = normalize_link_display_name(raw_name, fallback_name)
+        safe_name = escape(normalized_name)
         if seat_no is None:
             lines.append(f"<a href=\"tg://user?id={player.user_id}\">{safe_name}</a>")
         else:
@@ -5409,7 +5411,7 @@ async def on_private_text(message: Message) -> None:
 
         player = last_word_room.get_player(message.from_user.id)
         raw_name = player.full_name if player is not None else f"Игрок {message.from_user.id}"
-        safe_name = escape((raw_name or "").strip() or f"Игрок {message.from_user.id}")
+        safe_name = escape(normalize_link_display_name(raw_name or "", f"Игрок {message.from_user.id}"))
         player_mark = f"<a href=\"tg://user?id={message.from_user.id}\">{safe_name}</a>"
         safe_payload = escape(payload)
         await message.answer("Предсмертное сообщение принято.", **private_game_send_kwargs(last_word_room))
@@ -5489,7 +5491,7 @@ async def on_developer_phrase(message: Message) -> None:
     display_name = "пользователь"
     try:
         owner_chat = await message.bot.get_chat(OWNER_USER_ID)
-        display_name = escape((owner_chat.full_name or "").strip() or display_name)
+        display_name = escape(normalize_link_display_name(owner_chat.full_name or "", display_name))
     except Exception:
         pass
 
