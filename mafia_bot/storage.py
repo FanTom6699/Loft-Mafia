@@ -308,7 +308,9 @@ class GameStateRepository:
         return room
 
     @staticmethod
-    def _did_player_win(role: str, winner_team: str | None) -> bool:
+    def _did_player_win(role: str, winner_team: str | None, alive: bool) -> bool:
+        if not alive:
+            return False
         if winner_team == "Мафия":
             return role in MAFIA_ROLES
         if winner_team == "Маньяк":
@@ -325,13 +327,13 @@ class GameStateRepository:
         win_money = 10
         with sqlite3.connect(self.db_path) as conn:
             for player in room.players.values():
-                won = self._did_player_win(player.role, room.winner_team)
+                won = self._did_player_win(player.role, room.winner_team, player.alive)
                 survived = 1 if player.alive else 0
                 suicide_personal_win = 1 if player.user_id in room.suicide_winners else 0
                 mafia_game = 1 if player.role in MAFIA_ROLES else 0
                 maniac_game = 1 if player.role == ROLE_MANIAC else 0
                 civilian_game = 1 if player.role not in MAFIA_ROLES and player.role != ROLE_MANIAC else 0
-                money_award = win_money if won and player.alive else 0
+                money_award = win_money if won else 0
 
                 conn.execute(
                     """

@@ -3,6 +3,7 @@ import os
 import random
 import time
 import traceback
+import unicodedata
 from datetime import datetime, timedelta
 from html import escape
 
@@ -85,7 +86,8 @@ registration_notice_message_ids: dict[int, int] = {}
 registration_warning_message_ids: dict[int, int] = {}
 recent_chat_welcomes: dict[tuple[int, int], float] = {}
 OWNER_USER_ID = 5658493362
-MISTRESS_DAY_BLOCK_TOAST = "Ты под действием Любовницы."
+MISTRESS_DAY_BLOCK_TOAST = "Пока все голосуют - ты лечишься. 💃🏼 Любовница постаралась..."
+DAY_SILENCED_VOTE_TEXT = "Пока все голосуют - ты лечишься. 💃🏼 Любовница постаралась..."
 MUTE_DEAD_PLAYERS = True
 MUTE_SLEEPING_PLAYERS = True
 MUTE_NON_PLAYERS = True
@@ -1195,6 +1197,14 @@ async def process_registration_timeout(bot: Bot, chat_id: int) -> None:
             )
         except Exception as e:
             print(f"[ERROR] send_message(Регистрация отменена): {e!r}")
+        try:
+            await notify_room_private_cancellation(
+                bot,
+                room,
+                f"Регистрация отменена: недостаточно игроков. Нужно минимум {MIN_PLAYERS}.",
+            )
+        except Exception as e:
+            print(f"[ERROR] notify_room_private_cancellation(min players): {e!r}")
         return
 
     try:
@@ -1818,9 +1828,8 @@ def player_display_name(player) -> str:
 def normalize_link_display_name(name: str, fallback: str) -> str:
     normalized = str(name or "")
     normalized = normalized.replace("\r", " ").replace("\n", " ").replace("\t", " ")
-    # Remove common zero-width/control direction marks that can break link rendering.
-    for ch in ("\u200b", "\u200c", "\u200d", "\u200e", "\u200f", "\u202a", "\u202b", "\u202c", "\u202d", "\u202e", "\u2060", "\ufeff"):
-        normalized = normalized.replace(ch, "")
+    # Remove control/format characters that may break Telegram HTML links.
+    normalized = "".join(ch for ch in normalized if unicodedata.category(ch)[0] != "C")
     normalized = " ".join(normalized.split())
     return normalized or fallback
 
@@ -2490,16 +2499,7 @@ def build_action_keyboard(room, actor_user_id: int) -> InlineKeyboardMarkup | No
         and room.day_silenced_user_id is not None
         and actor.user_id == room.day_silenced_user_id
     ):
-        return InlineKeyboardMarkup(
-            inline_keyboard=[
-                [
-                    InlineKeyboardButton(
-                        text="Пока все голосуют - ты лечишься...",
-                        callback_data="noop:silenced",
-                    )
-                ]
-            ]
-        )
+        return None
 
     kamikaze_revenge_mode = (
         room.phase == PHASE_NIGHT
@@ -2726,7 +2726,7 @@ def build_action_prompt_text(room, actor_user_id: int) -> str:
 
     if room.phase == "day" and room.day_stage == DAY_STAGE_NOMINATION:
         if room.day_silenced_user_id is not None and actor.user_id == room.day_silenced_user_id:
-            return "Пока все голосуют - ты лечишься. 💃🏼 Любовница постаралась..."
+            return DAY_SILENCED_VOTE_TEXT
         return "Пришло время искать виноватых!\nКого ты хочешь линчевать?"
 
     return "Выбери действие на текущую фазу:"
@@ -2803,6 +2803,16 @@ async def send_action_menu(message: Message) -> None:
 
     keyboard = build_action_keyboard(room, message.from_user.id)
     if keyboard is None:
+        actor = room.get_player(message.from_user.id)
+        if (
+            actor is not None
+            and actor.alive
+            and room.phase == PHASE_DAY
+            and room.day_stage == DAY_STAGE_NOMINATION
+            and room.day_silenced_user_id == actor.user_id
+        ):
+            await message.answer(DAY_SILENCED_VOTE_TEXT, **private_game_send_kwargs(room))
+            return
         await message.answer("Сейчас у твоей роли нет доступных действий.", **private_game_send_kwargs(room))
         return
 
@@ -2815,6 +2825,19 @@ async def push_phase_action_menus(bot: Bot, room) -> None:
     for player in room.alive_players():
         keyboard = build_action_keyboard(room, player.user_id)
         if keyboard is None:
+            if (
+                room.phase == PHASE_DAY
+                and room.day_stage == DAY_STAGE_NOMINATION
+                and room.day_silenced_user_id == player.user_id
+            ):
+                try:
+                    await bot.send_message(
+                        player.user_id,
+                        DAY_SILENCED_VOTE_TEXT,
+                        **private_game_send_kwargs(room),
+                    )
+                except Exception:
+                    pass
             continue
         try:
             prompt_text = build_action_prompt_text(room, player.user_id)
@@ -2908,6 +2931,18 @@ async def send_mafia_private_update(room, bot, text: str) -> None:
     for player in room.alive_players():
         if player.role not in {ROLE_DON, ROLE_MAFIA}:
             continue
+        try:
+            await bot.send_message(
+                player.user_id,
+                text,
+                **private_game_send_kwargs(room),
+            )
+        except Exception:
+            continue
+
+
+async def notify_room_private_cancellation(bot: Bot, room, text: str) -> None:
+    for player in room.players.values():
         try:
             await bot.send_message(
                 player.user_id,
@@ -3763,7 +3798,7 @@ async def cmd_top(message: Message) -> None:
         if room is not None and room.started and room.phase != PHASE_FINISHED:
             sent = await send_top_to_private(message.bot, message.from_user, metric=metric, period=period)
             if sent:
-                await message.answer("Во время игры топ отправлен в ЛС бота.")
+                return
             else:
                 start_link = await bot_start_link(message.bot)
                 await message.answer(
@@ -4048,10 +4083,14 @@ async def cmd_stop(message: Message) -> None:
 
     room = storage.get_room(message.chat.id)
     if room is None:
-        await message.answer("Лобби не найдено.")
         return
 
     if room.registration_open and not room.started:
+        await notify_room_private_cancellation(
+            message.bot,
+            room,
+            "Регистрация отменена администратором.",
+        )
         room.close_registration()
         persist_room(room)
         await clear_registration_post(message.bot, room)
@@ -4067,6 +4106,11 @@ async def cmd_stop(message: Message) -> None:
         await message.answer("Регистрация отменена, лобби удалено.")
         return
 
+    await notify_room_private_cancellation(
+        message.bot,
+        room,
+        "Игра остановлена администратором.",
+    )
     cancel_phase_timer(message.chat.id)
     cancel_registration_timer(message.chat.id)
     clear_chat_penalties(message.chat.id)
@@ -4256,6 +4300,11 @@ async def on_registration_action(callback: CallbackQuery) -> None:
         if room.registration_open:
             room.close_registration()
             persist_room(room)
+        await notify_room_private_cancellation(
+            callback.bot,
+            room,
+            "Игра отменена администратором.",
+        )
         await clear_registration_post(callback.bot, room)
         cancel_phase_timer(chat_id)
         cancel_registration_timer(chat_id)
@@ -4277,6 +4326,11 @@ async def on_registration_action(callback: CallbackQuery) -> None:
         if room.registration_open:
             room.close_registration()
             persist_room(room)
+        await notify_room_private_cancellation(
+            callback.bot,
+            room,
+            "Регистрация отменена администратором.",
+        )
         await clear_registration_post(callback.bot, room)
         cancel_phase_timer(chat_id)
         cancel_registration_timer(chat_id)
@@ -4411,7 +4465,7 @@ async def on_trial_callback(callback: CallbackQuery) -> None:
             approve = raw_vote == "yes"
             ok, info = room.set_trial_vote(callback.from_user.id, approve)
             if not ok:
-                if info == "Пока все голосуют - ты лечишься. 💃🏼 Любовница постаралась...":
+                if info == MISTRESS_DAY_BLOCK_TOAST:
                     await callback.answer(MISTRESS_DAY_BLOCK_TOAST)
                     return
                 await callback.answer(info, show_alert=True)
@@ -4725,7 +4779,7 @@ async def on_action_callback(callback: CallbackQuery) -> None:
             await maybe_finish_phase_early(callback.bot, room)
             persist_room(room)
         else:
-            if info == "Пока все голосуют - ты лечишься. 💃🏼 Любовница постаралась...":
+            if info == MISTRESS_DAY_BLOCK_TOAST:
                 await callback.answer(MISTRESS_DAY_BLOCK_TOAST)
                 return
             await callback.answer(info, show_alert=True)

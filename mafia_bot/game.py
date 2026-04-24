@@ -1,4 +1,5 @@
 import random
+import unicodedata
 from dataclasses import dataclass, field
 from datetime import datetime
 from html import escape
@@ -270,8 +271,7 @@ class Player:
 def normalize_link_display_name(name: str, fallback: str) -> str:
     normalized = str(name or "")
     normalized = normalized.replace("\r", " ").replace("\n", " ").replace("\t", " ")
-    for ch in ("\u200b", "\u200c", "\u200d", "\u200e", "\u200f", "\u202a", "\u202b", "\u202c", "\u202d", "\u202e", "\u2060", "\ufeff"):
-        normalized = normalized.replace(ch, "")
+    normalized = "".join(ch for ch in normalized if unicodedata.category(ch)[0] != "C")
     normalized = " ".join(normalized.split())
     return normalized or fallback
 
@@ -965,7 +965,7 @@ class GameRoom:
         if not voter.alive:
             return False, "Ты выбыл из игры."
         if self.day_silenced_user_id is not None and voter.user_id == self.day_silenced_user_id:
-            return False, "Пока все голосуют - ты лечишься. 💃🏼 Любовница постаралась..."
+            return False, '"Ты со мною забудь обо всём...", - пела 💃🏼 Любовница'
         if self.trial_candidate_id is not None and voter.user_id == self.trial_candidate_id:
             return False, "Кандидат на повешение не может голосовать за/против."
 
@@ -1328,7 +1328,7 @@ class GameRoom:
             if blocked_target is not None and blocked_target.alive:
                 self.add_night_report_line(
                     blocked_target.user_id,
-                    "💃🏼 Любовница пришла к тебе этой ночью. Днем ты не сможешь писать в чат и голосовать.",
+                    '"Ты со мною забудь обо всём...", - пела 💃🏼 Любовница\nДнем ты не сможешь писать в чат и голосовать.',
                 )
 
         if doctor_target_id is not None:
@@ -1796,7 +1796,7 @@ class GameRoom:
         if not voter.alive:
             return False, "Ты выбыл из игры."
         if self.day_silenced_user_id is not None and voter.user_id == self.day_silenced_user_id:
-            return False, "Пока все голосуют - ты лечишься. 💃🏼 Любовница постаралась..."
+            return False, '"Ты со мною забудь обо всём...", - пела 💃🏼 Любовница'
         if not target.alive:
             return False, "Цель уже выбыла."
         if voter.user_id == target.user_id:
@@ -1957,7 +1957,9 @@ class GameRoom:
             is_winner = (
                 winner == "Мафия" and player.role in MAFIA_ROLES
             ) or (
-                winner == "Мирные жители" and player.role not in MAFIA_ROLES
+                winner == "Маньяк" and player.role == ROLE_MANIAC
+            ) or (
+                winner == "Мирные жители" and player.role not in MAFIA_ROLES and player.role != ROLE_MANIAC
             )
             if is_winner and player.alive:
                 winners.append(player)
