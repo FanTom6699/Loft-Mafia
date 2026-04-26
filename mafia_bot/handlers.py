@@ -1210,7 +1210,7 @@ async def process_registration_timeout(bot: Bot, chat_id: int) -> None:
             await notify_room_private_cancellation(
                 bot,
                 room,
-                f"Регистрация отменена: недостаточно игроков. Нужно минимум {MIN_PLAYERS}.",
+                f"<b>Регистрация отменена.</b>\nНедостаточно игроков. Нужно минимум {MIN_PLAYERS}.",
             )
         except Exception as e:
             print(f"[ERROR] notify_room_private_cancellation(min players): {e!r}")
@@ -3961,8 +3961,7 @@ async def cmd_create(message: Message) -> None:
             await refresh_registration_post(message, room)
             await pin_registration_post(message.bot, room)
         info_message = await message.answer(
-            "Лобби уже создано. Используй существующее сообщение регистрации "
-            "и кнопку регистрации под ним."
+            "Лобби уже создано. Регистрируйся в текущем сообщении."
         )
         registration_notice_message_ids[message.chat.id] = info_message.message_id
         return
