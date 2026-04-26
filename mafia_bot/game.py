@@ -1292,17 +1292,19 @@ class GameRoom:
             if blocked_target is not None and blocked_target.alive:
                 mistress_killer_bypass = False
 
-                temporary_mafia_target_id = self._choose_mafia_target(self._active_mafia_votes())
-                if blocked_target.role in MAFIA_ROLES and temporary_mafia_target_id == mistress.user_id:
-                    mistress_killer_bypass = True
-                elif blocked_target.role == ROLE_MANIAC and self.maniac_target_id == mistress.user_id:
-                    mistress_killer_bypass = True
-                elif (
-                    blocked_target.role == ROLE_COMMISSAR
-                    and self.commissar_action_mode == "shoot"
-                    and self.commissar_shot_target_id == mistress.user_id
-                ):
-                    mistress_killer_bypass = True
+                doctor_same_target = self.doctor_target_id == blocked_target.user_id
+                if not doctor_same_target:
+                    temporary_mafia_target_id = self._choose_mafia_target(self._active_mafia_votes())
+                    if blocked_target.role in MAFIA_ROLES and temporary_mafia_target_id == mistress.user_id:
+                        mistress_killer_bypass = True
+                    elif blocked_target.role == ROLE_MANIAC and self.maniac_target_id == mistress.user_id:
+                        mistress_killer_bypass = True
+                    elif (
+                        blocked_target.role == ROLE_COMMISSAR
+                        and self.commissar_action_mode == "shoot"
+                        and self.commissar_shot_target_id == mistress.user_id
+                    ):
+                        mistress_killer_bypass = True
 
                 if mistress_killer_bypass:
                     mistress_effective_target_id = None
@@ -1535,7 +1537,9 @@ class GameRoom:
         if mistress_effective_target_id is not None:
             silenced_player = self.get_player(mistress_effective_target_id)
             if silenced_player is not None and silenced_player.alive:
-                self.day_silenced_user_id = silenced_player.user_id
+                # Doctor neutralizes chat silence if both visited the same target this night.
+                if doctor_target_id != silenced_player.user_id:
+                    self.day_silenced_user_id = silenced_player.user_id
 
         bum = next((p for p in self.alive_players() if p.role == ROLE_BUM), None)
         if bum is not None and self.bum_target_id is not None:
@@ -1955,11 +1959,14 @@ class GameRoom:
 
         for player in self.players.values():
             is_winner = (
-                winner == "Мафия" and player.role in MAFIA_ROLES
+                winner == "Мафия" and (player.role in MAFIA_ROLES or player.role == ROLE_ADVOCATE)
             ) or (
                 winner == "Маньяк" and player.role == ROLE_MANIAC
             ) or (
-                winner == "Мирные жители" and player.role not in MAFIA_ROLES and player.role != ROLE_MANIAC
+                winner == "Мирные жители"
+                and player.role not in MAFIA_ROLES
+                and player.role != ROLE_MANIAC
+                and player.role != ROLE_ADVOCATE
             )
             if is_winner and player.alive:
                 winners.append(player)

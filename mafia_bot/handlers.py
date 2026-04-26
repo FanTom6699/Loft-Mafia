@@ -1579,11 +1579,11 @@ async def send_endgame_currency_summaries(bot: Bot, room) -> None:
             continue
         won = False
         if room.winner_team == "Мафия":
-            won = player.role in MAFIA_ROLES
+            won = player.role in MAFIA_ROLES or player.role == ROLE_ADVOCATE
         elif room.winner_team == "Маньяк":
             won = player.role == ROLE_MANIAC
         elif room.winner_team == "Мирные жители":
-            won = player.role not in MAFIA_ROLES and player.role != ROLE_MANIAC
+            won = player.role not in MAFIA_ROLES and player.role != ROLE_MANIAC and player.role != ROLE_ADVOCATE
         reward_awarded = won and player.alive
         try:
             await bot.send_message(

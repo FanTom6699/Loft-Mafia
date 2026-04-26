@@ -3,7 +3,7 @@ import os
 import sqlite3
 from datetime import datetime, timedelta
 
-from mafia_bot.game import MAFIA_ROLES, ROLE_MANIAC, GameRoom, Player
+from mafia_bot.game import MAFIA_ROLES, ROLE_ADVOCATE, ROLE_MANIAC, GameRoom, Player
 
 
 def _default_db_path() -> str:
@@ -312,11 +312,11 @@ class GameStateRepository:
         if not alive:
             return False
         if winner_team == "Мафия":
-            return role in MAFIA_ROLES
+            return role in MAFIA_ROLES or role == ROLE_ADVOCATE
         if winner_team == "Маньяк":
             return role == ROLE_MANIAC
         if winner_team == "Мирные жители":
-            return role not in MAFIA_ROLES and role != ROLE_MANIAC
+            return role not in MAFIA_ROLES and role != ROLE_MANIAC and role != ROLE_ADVOCATE
         return False
 
     def record_finished_game_stats(self, room: GameRoom) -> None:
@@ -330,9 +330,13 @@ class GameStateRepository:
                 won = self._did_player_win(player.role, room.winner_team, player.alive)
                 survived = 1 if player.alive else 0
                 suicide_personal_win = 1 if player.user_id in room.suicide_winners else 0
-                mafia_game = 1 if player.role in MAFIA_ROLES else 0
+                mafia_game = 1 if player.role in MAFIA_ROLES or player.role == ROLE_ADVOCATE else 0
                 maniac_game = 1 if player.role == ROLE_MANIAC else 0
-                civilian_game = 1 if player.role not in MAFIA_ROLES and player.role != ROLE_MANIAC else 0
+                civilian_game = (
+                    1
+                    if player.role not in MAFIA_ROLES and player.role != ROLE_MANIAC and player.role != ROLE_ADVOCATE
+                    else 0
+                )
                 money_award = win_money if won else 0
 
                 conn.execute(
