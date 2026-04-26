@@ -88,6 +88,15 @@ recent_chat_welcomes: dict[tuple[int, int], float] = {}
 OWNER_USER_ID = 5658493362
 MISTRESS_DAY_BLOCK_TOAST = "Пока все голосуют - ты лечишься. 💃🏼 Любовница постаралась..."
 DAY_SILENCED_VOTE_TEXT = "Пока все голосуют - ты лечишься. 💃🏼 Любовница постаралась..."
+MSG_ADMIN_REQUIRED = "Недоступно: нужны права администратора с правом «Изменение информации группы»."
+MSG_LOBBY_NOT_FOUND = "Лобби не найдено. Создай новое лобби через /game."
+MSG_REGISTRATION_CLOSED = "Регистрация уже закрыта. Дождись следующего набора."
+MSG_GAME_ALREADY_RUNNING = "Игра уже идет. Дождись завершения текущей партии."
+MSG_REGISTRATION_CANCELLED_ADMIN = "Регистрация отменена администратором."
+MSG_GAME_CANCELLED_ADMIN = "Игра отменена администратором."
+MSG_GAME_STOPPED_ADMIN = "Игра остановлена администратором."
+MSG_NOT_IN_GAME = "Недоступно: ты не участвуешь в текущей игре."
+MSG_INVALID_ACTION = "Недоступно: некорректное действие."
 MUTE_DEAD_PLAYERS = True
 MUTE_SLEEPING_PLAYERS = True
 MUTE_NON_PLAYERS = True
@@ -3665,7 +3674,7 @@ async def cmd_start(message: Message, command: CommandObject) -> None:
             return
 
         if not room.registration_open or room.started:
-            await message.answer("Регистрация уже закрыта.")
+            await message.answer(MSG_REGISTRATION_CLOSED)
             return
 
         ok, info = room.add_player(message.from_user.id, nickname)
@@ -3841,7 +3850,7 @@ async def cmd_settings(message: Message) -> None:
         return
 
     if not await is_group_settings_admin(message.bot, message.chat.id, message.from_user.id):
-        await message.answer("Настройки доступны только администраторам с правом «Изменение информации группы».")
+        await message.answer(MSG_ADMIN_REQUIRED)
         return
 
     if not repo.has_private_user(message.from_user.id):
@@ -3924,7 +3933,7 @@ async def cmd_create(message: Message) -> None:
             return
         room = storage.get_room(message.chat.id)
     elif room.started and room.phase != PHASE_FINISHED:
-        await message.answer("Игра уже идет. Заверши текущую игру перед новой регистрацией.")
+        await message.answer(MSG_GAME_ALREADY_RUNNING)
         return
 
     if room is not None and room.registration_open:
@@ -4036,7 +4045,7 @@ async def cmd_lobby(message: Message) -> None:
     await cleanup_group_command_message(message)
     room = storage.get_room(message.chat.id)
     if room is None:
-        await message.answer("Лобби не найдено.")
+        await message.answer(MSG_LOBBY_NOT_FOUND)
         return
 
     await message.answer(room.lobby_text(), parse_mode="HTML")
@@ -4047,10 +4056,10 @@ async def cmd_extend(message: Message) -> None:
     await cleanup_group_command_message(message)
     room = storage.get_room(message.chat.id)
     if room is None:
-        await message.answer("Лобби не найдено.")
+        await message.answer(MSG_LOBBY_NOT_FOUND)
         return
     if room.started or not room.registration_open:
-        await message.answer("Регистрация уже закрыта.")
+        await message.answer(MSG_REGISTRATION_CLOSED)
         return
 
     room.extend_registration()
@@ -4078,7 +4087,7 @@ async def cmd_stop(message: Message) -> None:
     if message.from_user is None:
         return
     if not await is_group_settings_admin(message.bot, message.chat.id, message.from_user.id):
-        await message.answer("Отмена игры доступна только администраторам с правом «Изменение информации группы».")
+        await message.answer(MSG_ADMIN_REQUIRED)
         return
 
     room = storage.get_room(message.chat.id)
@@ -4089,7 +4098,7 @@ async def cmd_stop(message: Message) -> None:
         await notify_room_private_cancellation(
             message.bot,
             room,
-            "Регистрация отменена администратором.",
+            MSG_REGISTRATION_CANCELLED_ADMIN,
         )
         room.close_registration()
         persist_room(room)
@@ -4103,13 +4112,13 @@ async def cmd_stop(message: Message) -> None:
         clear_action_menu_messages(message.chat.id)
         remove_room_state(message.chat.id)
         storage.close_room(message.chat.id)
-        await message.answer("Регистрация отменена, лобби удалено.")
+        await message.answer(MSG_REGISTRATION_CANCELLED_ADMIN)
         return
 
     await notify_room_private_cancellation(
         message.bot,
         room,
-        "Игра остановлена администратором.",
+        MSG_GAME_STOPPED_ADMIN,
     )
     cancel_phase_timer(message.chat.id)
     cancel_registration_timer(message.chat.id)
@@ -4121,7 +4130,7 @@ async def cmd_stop(message: Message) -> None:
     await clear_registration_warning_message(message.bot, message.chat.id)
     remove_room_state(message.chat.id)
     storage.close_room(message.chat.id)
-    await message.answer("Игра остановлена.")
+    await message.answer(MSG_GAME_STOPPED_ADMIN)
 
 
 @router.message(Command("start"))
@@ -4129,11 +4138,11 @@ async def cmd_begin(message: Message) -> None:
     await cleanup_group_command_message(message)
     room = storage.get_room(message.chat.id)
     if room is None:
-        await message.answer("Лобби не найдено.")
+        await message.answer(MSG_LOBBY_NOT_FOUND)
         return
 
     if not room.registration_open:
-        await message.answer("Регистрация уже закрыта.")
+        await message.answer(MSG_REGISTRATION_CLOSED)
         return
 
     if len(room.players) < MIN_PLAYERS:
@@ -4223,10 +4232,10 @@ async def on_registration_action(callback: CallbackQuery) -> None:
             await callback.answer("Пока действует мут, регистрация недоступна.", show_alert=True)
             return
         if room is None:
-            await callback.answer("Сначала создай лобби.", show_alert=True)
+            await callback.answer("Сначала создай лобби через /game.", show_alert=True)
             return
         if not room.registration_open or room.started:
-            await callback.answer("Регистрация закрыта.", show_alert=True)
+            await callback.answer(MSG_REGISTRATION_CLOSED, show_alert=True)
             return
 
         ok, info = room.add_player(callback.from_user.id, user_nickname(callback.from_user))
@@ -4245,7 +4254,7 @@ async def on_registration_action(callback: CallbackQuery) -> None:
 
     if action == "leave":
         if room is None:
-            await callback.answer("Лобби не найдено.", show_alert=True)
+            await callback.answer(MSG_LOBBY_NOT_FOUND, show_alert=True)
             return
 
         ok, info = room.remove_player(callback.from_user.id)
@@ -4290,7 +4299,7 @@ async def on_registration_action(callback: CallbackQuery) -> None:
     if action == "finish_cancel":
         if not await is_group_settings_admin(callback.bot, chat_id, callback.from_user.id):
             await callback.answer(
-                "Отмена игры доступна только администраторам с правом «Изменение информации группы».",
+                MSG_ADMIN_REQUIRED,
                 show_alert=True,
             )
             return
@@ -4303,7 +4312,7 @@ async def on_registration_action(callback: CallbackQuery) -> None:
         await notify_room_private_cancellation(
             callback.bot,
             room,
-            "Игра отменена администратором.",
+            MSG_GAME_CANCELLED_ADMIN,
         )
         await clear_registration_post(callback.bot, room)
         cancel_phase_timer(chat_id)
@@ -4312,14 +4321,14 @@ async def on_registration_action(callback: CallbackQuery) -> None:
         clear_action_menu_messages(chat_id)
         remove_room_state(chat_id)
         storage.close_room(chat_id)
-        await callback.message.answer("Регистрация завершена. Игра отменена.")
+        await callback.message.answer(MSG_GAME_CANCELLED_ADMIN)
         await callback.answer("Игра отменена")
         return
 
     if action == "cancel":
         if not await is_group_settings_admin(callback.bot, chat_id, callback.from_user.id):
             await callback.answer(
-                "Отмена игры доступна только администраторам с правом «Изменение информации группы».",
+                MSG_ADMIN_REQUIRED,
                 show_alert=True,
             )
             return
@@ -4329,7 +4338,7 @@ async def on_registration_action(callback: CallbackQuery) -> None:
         await notify_room_private_cancellation(
             callback.bot,
             room,
-            "Регистрация отменена администратором.",
+            MSG_REGISTRATION_CANCELLED_ADMIN,
         )
         await clear_registration_post(callback.bot, room)
         cancel_phase_timer(chat_id)
@@ -4338,7 +4347,7 @@ async def on_registration_action(callback: CallbackQuery) -> None:
         clear_action_menu_messages(chat_id)
         remove_room_state(chat_id)
         storage.close_room(chat_id)
-        await callback.message.answer("Регистрация отменена, лобби удалено.")
+        await callback.message.answer(MSG_REGISTRATION_CANCELLED_ADMIN)
         await callback.answer("Отменено")
         return
 
@@ -4350,7 +4359,7 @@ async def cmd_status(message: Message) -> None:
     await cleanup_group_command_message(message)
     room = storage.get_room(message.chat.id)
     if room is None:
-        await message.answer("Лобби не найдено.")
+        await message.answer(MSG_LOBBY_NOT_FOUND)
         return
 
     await message.answer(room.status_text(), parse_mode="HTML")
@@ -4427,18 +4436,18 @@ async def on_trial_callback(callback: CallbackQuery) -> None:
 
         parts = callback.data.split(":")
         if len(parts) != 3:
-            await callback.answer("Некорректное голосование.", show_alert=True)
+            await callback.answer("Некорректное голосование. Попробуй снова.", show_alert=True)
             return
 
         _, raw_vote, raw_chat_id = parts
         if raw_vote not in {"yes", "no"}:
-            await callback.answer("Некорректный вариант голоса.", show_alert=True)
+            await callback.answer("Некорректный вариант голоса. Попробуй снова.", show_alert=True)
             return
 
         try:
             chat_id = int(raw_chat_id)
         except ValueError:
-            await callback.answer("Некорректный чат.", show_alert=True)
+            await callback.answer("Некорректный чат. Попробуй снова.", show_alert=True)
             return
 
         should_finish_trial = False
@@ -4446,20 +4455,20 @@ async def on_trial_callback(callback: CallbackQuery) -> None:
         async with lock:
             room = storage.get_room(chat_id)
             if room is None or room.phase != PHASE_DAY or room.day_stage != DAY_STAGE_TRIAL:
-                await callback.answer("Сейчас нет активного голосования за/против.", show_alert=True)
+                await callback.answer("Сейчас нет активного голосования за/против. Дождись начала повешения.", show_alert=True)
                 return
 
             if callback.message.chat.id != room.chat_id:
-                await callback.answer("Голосование проходит в групповом чате.", show_alert=True)
+                await callback.answer("Голосование проходит в групповом чате. Проголосуй в чате игры.", show_alert=True)
                 return
 
             if room.trial_vote_message_id is not None and callback.message.message_id != room.trial_vote_message_id:
-                await callback.answer("Это голосование уже завершено.", show_alert=True)
+                await callback.answer("Это голосование уже завершено. Дождись следующего этапа.", show_alert=True)
                 return
 
             voter = room.get_player(callback.from_user.id)
             if voter is None or not voter.alive:
-                await callback.answer("Ты не в игре.")
+                await callback.answer(MSG_NOT_IN_GAME)
                 return
 
             approve = raw_vote == "yes"
@@ -4529,7 +4538,7 @@ async def on_action_callback(callback: CallbackQuery) -> None:
 
     parts = callback.data.split(":")
     if len(parts) != 4:
-        await callback.answer("Некорректное действие.", show_alert=True)
+        await callback.answer(MSG_INVALID_ACTION, show_alert=True)
         return
 
     _, action, raw_chat_id, raw_target_id = parts
@@ -4537,17 +4546,17 @@ async def on_action_callback(callback: CallbackQuery) -> None:
         chat_id = int(raw_chat_id)
         target_id = int(raw_target_id)
     except ValueError:
-        await callback.answer("Некорректные параметры.", show_alert=True)
+        await callback.answer("Некорректные параметры. Проверь и попробуй снова.", show_alert=True)
         return
 
     room = storage.get_room(chat_id)
     if room is None:
-        await callback.answer("Игра не найдена.", show_alert=True)
+        await callback.answer("Игра не найдена. Дождись следующей партии.", show_alert=True)
         return
 
     actor = room.get_player(callback.from_user.id)
     if actor is None:
-        await callback.answer("Ты не в игре.")
+        await callback.answer(MSG_NOT_IN_GAME)
         return
     if not actor.alive:
         is_kamikaze_revenge = (
@@ -4556,7 +4565,7 @@ async def on_action_callback(callback: CallbackQuery) -> None:
             and room.kamikaze_pending_user_id == actor.user_id
         )
         if not is_kamikaze_revenge:
-            await callback.answer("Ты не в игре.")
+            await callback.answer(MSG_NOT_IN_GAME)
             return
 
     if room.phase == PHASE_NIGHT and callback.from_user.id in getattr(room, "night_skipped_user_ids", set()):
@@ -4790,7 +4799,7 @@ async def on_action_callback(callback: CallbackQuery) -> None:
             await callback.answer("Сейчас идет повешение: можно только поставить 👍 или 👎 в чате.", show_alert=True)
             return
         if room.phase != PHASE_DAY or room.day_stage != DAY_STAGE_NOMINATION:
-            await callback.answer("Сейчас не этап выбора кандидата.", show_alert=True)
+            await callback.answer("Сейчас не этап выбора кандидата. Дождись начала голосования.", show_alert=True)
             return
         if not day_vote_skip_enabled(room):
             await callback.answer("Пропуск дневного голосования отключен в настройках.", show_alert=True)
@@ -4802,7 +4811,7 @@ async def on_action_callback(callback: CallbackQuery) -> None:
 
         voter = room.get_player(callback.from_user.id)
         if voter is None or not voter.alive:
-            await callback.answer("Ты не в игре.")
+            await callback.answer(MSG_NOT_IN_GAME)
             return
         if room.day_silenced_user_id is not None and voter.user_id == room.day_silenced_user_id:
             await callback.answer(MISTRESS_DAY_BLOCK_TOAST)
@@ -5209,7 +5218,7 @@ async def on_private_settings_callback(callback: CallbackQuery) -> None:
 
     if not await is_group_settings_admin(callback.bot, chat_id, callback.from_user.id):
         await safe_answer(
-            "Настройки доступны только администраторам с правом «Изменение информации группы».",
+            MSG_ADMIN_REQUIRED,
             show_alert=True,
         )
         return
