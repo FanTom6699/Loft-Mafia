@@ -5,6 +5,7 @@ The public compatibility surface remains ``mafia_bot.game`` for now.
 
 from .constants import *
 from .roles import *
+from .assignment import assign_roles, build_roles
 from .models import GameRoom, Player
 from .storage import GameStorage
 
