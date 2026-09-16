@@ -3,27 +3,9 @@
 from html import escape
 import unicodedata
 
-from .constants import (
-    GAME_MODE_CLASSIC,
-    GAME_MODE_INVISIBLE,
-    GAME_MODE_TITLES,
-    MAFIA_RATIO_TARGETS,
-    MAFIA_ROLES,
-    ROLE_ADVOCATE,
-    ROLE_BUM,
-    ROLE_CITIZEN,
-    ROLE_COMMISSAR,
-    ROLE_DON,
-    ROLE_DOCTOR,
-    ROLE_KAMIKAZE,
-    ROLE_LUCKY,
-    ROLE_MAFIA,
-    ROLE_MANIAC,
-    ROLE_MISTRESS,
-    ROLE_SERGEANT,
-    ROLE_SUICIDE,
-)
+from .constants import *
 
+# These are the original role-card texts shown to players when the game starts.
 ROLE_EMOJI = {
     ROLE_DON: "🤵🏻",
     ROLE_MAFIA: "🤵🏼",
@@ -51,9 +33,9 @@ ROLE_DESCRIPTION = {
     ROLE_DON: "Тебе решать кто не проснётся этой ночью...",
     ROLE_KAMIKAZE: "Днём и ночью ты обычный мирный житель, но если тебя попытаются повесить, то ты сможешь выбрать кого из игроков забрать с собой в могилу",
     ROLE_SERGEANT: "Помощник комиссара Каттани. Он будет информировать тебя о своих действиях и держать в курсе событий. Если комиссар погибнет - ты займёшь его место",
+    ROLE_LUCKY: "Твоя задача вычислить мафию и на городском собрании линчевать засранцев. Если повезёт, при покушении ты останешься жив.",
+    ROLE_MANIAC: "Все вокруг должны умереть, кроме тебя, конечно :)",
     ROLE_SUICIDE: "Твоя цель - быть казненным на дневном голосовании.",
-    ROLE_LUCKY: "Обычный мирный с удачей: при одной ночной атаке можешь выжить с шансом 50/50.",
-    ROLE_MANIAC: "Ты нейтральный убийца. Для победы нужно остаться единственным выжившим.",
 }
 
 ROLE_ACTION_RULES = {
@@ -122,9 +104,7 @@ def all_roles_info_text() -> str:
         emoji = ROLE_EMOJI.get(role, "")
         desc = ROLE_DESCRIPTION.get(role, "Описание пока не добавлено.")
         action_rule = ROLE_ACTION_RULES.get(role, "Механика роли пока не добавлена.")
-        lines.append(
-            f"\n{emoji} <b>{role}</b>\nОписание: {desc}\nКак ходит: {action_rule}"
-        )
+        lines.append(f"\n{emoji} <b>{role}</b>\nОписание: {desc}\nКак ходит: {action_rule}")
     return "\n".join(lines)
 
 
