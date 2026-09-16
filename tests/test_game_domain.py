@@ -18,6 +18,30 @@ class GameDomainCompatibilityTests(unittest.TestCase):
         self.assertIs(game.GameRoom, GameRoom)
         self.assertIs(game.GameStorage, GameStorage)
 
+    def test_models_are_owned_by_domain(self) -> None:
+        self.assertEqual(Player.__module__, "mafia_bot.game_domain.models")
+        self.assertEqual(GameRoom.__module__, "mafia_bot.game_domain.models")
+        expected_fields = {
+            "chat_id",
+            "host_id",
+            "settings",
+            "chat_title",
+            "players",
+            "started",
+            "phase",
+            "round_no",
+            "registration_open",
+            "night_votes",
+            "day_votes",
+            "trial_candidate_id",
+            "night_reports",
+            "pending_last_words",
+            "winner_team",
+            "started_at",
+            "finished_at",
+        }
+        self.assertTrue(expected_fields.issubset(GameRoom.__dataclass_fields__))
+
     def test_lobby_methods_are_from_domain_module(self) -> None:
         self.assertEqual(GameRoom.add_player.__module__, "mafia_bot.game_domain.lobby")
         self.assertEqual(GameRoom.open_registration.__module__, "mafia_bot.game_domain.lobby")
