@@ -27,6 +27,18 @@ class GameDomainCompatibilityTests(unittest.TestCase):
         self.assertEqual(GameRoom.assign_roles.__module__, "mafia_bot.game_domain.assignment")
         self.assertEqual(GameRoom.build_roles.__module__, "mafia_bot.game_domain.assignment")
 
+    def test_night_action_methods_are_from_domain_module(self) -> None:
+        self.assertEqual(GameRoom.set_night_vote.__module__, "mafia_bot.game_domain.night_actions")
+        self.assertEqual(GameRoom.set_doctor_target.__module__, "mafia_bot.game_domain.night_actions")
+        self.assertEqual(GameRoom.set_maniac_target.__module__, "mafia_bot.game_domain.night_actions")
+        self.assertEqual(GameRoom.set_mistress_target.__module__, "mafia_bot.game_domain.night_actions")
+        self.assertEqual(GameRoom.set_bum_target.__module__, "mafia_bot.game_domain.night_actions")
+        self.assertEqual(GameRoom.set_advocate_target.__module__, "mafia_bot.game_domain.night_actions")
+        self.assertEqual(GameRoom.check_player_role.__module__, "mafia_bot.game_domain.night_actions")
+        self.assertEqual(GameRoom.set_commissar_action_mode.__module__, "mafia_bot.game_domain.night_actions")
+        self.assertEqual(GameRoom.set_commissar_shot_target.__module__, "mafia_bot.game_domain.night_actions")
+        self.assertEqual(GameRoom.set_kamikaze_target.__module__, "mafia_bot.game_domain.night_actions")
+
     def test_room_starts_empty_and_can_open_registration(self) -> None:
         room = GameRoom(chat_id=123, host_id=456)
         self.assertEqual(room.players, {})
