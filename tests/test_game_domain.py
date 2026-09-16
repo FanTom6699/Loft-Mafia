@@ -18,6 +18,11 @@ class GameDomainCompatibilityTests(unittest.TestCase):
         self.assertIs(game.GameRoom, GameRoom)
         self.assertIs(game.GameStorage, GameStorage)
 
+    def test_lobby_methods_are_from_domain_module(self) -> None:
+        self.assertEqual(GameRoom.add_player.__module__, "mafia_bot.game_domain.lobby")
+        self.assertEqual(GameRoom.open_registration.__module__, "mafia_bot.game_domain.lobby")
+        self.assertEqual(GameRoom.remove_player.__module__, "mafia_bot.game_domain.lobby")
+
     def test_room_starts_empty_and_can_open_registration(self) -> None:
         room = GameRoom(chat_id=123, host_id=456)
         self.assertEqual(room.players, {})
