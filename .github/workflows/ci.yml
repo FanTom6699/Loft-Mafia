@@ -30,3 +30,6 @@ jobs:
       - name: Import check
         run: |
           python -c "import aiogram; from mafia_bot.handlers import router; print('handlers import ok')"
+
+      - name: Domain tests
+        run: python -m unittest discover -s tests -p 'test_*.py' -v
