@@ -1,10 +1,16 @@
 """Stateful domain models for the Mafia game.
 
-``GameRoom`` remains the historical runtime class for compatibility while
-individual behavior is extracted into focused domain modules.
+The data model is copied from the historical ``GameRoom`` while behavior is
+attached from focused domain modules below. Keeping the fields unchanged
+preserves storage compatibility during the migration.
 """
 
-from ..game_legacy import GameRoom, Player
+from dataclasses import dataclass, field
+from datetime import datetime
+
+from .constants import (
+    PHASE_LOBBY,
+)
 from .assignment import assign_roles, build_roles
 from .day_flow import (
     _reset_for_night_transition,
@@ -94,8 +100,83 @@ from .presentation import (
     status_text,
 )
 
+
+@dataclass
+class Player:
+    user_id: int
+    full_name: str
+    role: str = ""
+    alive: bool = True
+
+
+@dataclass
+class GameRoom:
+    chat_id: int
+    host_id: int
+    settings: dict = field(default_factory=dict)
+
+    chat_title: str = ""
+    players: dict[int, Player] = field(default_factory=dict)
+    started: bool = False
+    phase: str = PHASE_LOBBY
+    round_no: int = 0
+    registration_open: bool = False
+    registration_extensions: int = 0
+    registration_message_id: int | None = None
+    night_votes: dict[int, int] = field(default_factory=dict)
+    night_skipped_user_ids: set[int] = field(default_factory=set)
+    mafia_vote_locked: bool = False
+    mafia_target_announced: bool = False
+    announced_night_roles: set[str] = field(default_factory=set)
+    last_don_successor_id: int | None = None
+    day_stage: str | None = None
+    day_votes: dict[int, int] = field(default_factory=dict)
+    trial_candidate_id: int | None = None
+    trial_vote_message_id: int | None = None
+    trial_votes: dict[int, bool] = field(default_factory=dict)
+    night_kill_sources: dict[int, list[str]] = field(default_factory=dict)
+    day_silenced_user_id: int | None = None
+    doctor_target_id: int | None = None
+    doctor_self_heal_used: bool = False
+    lucky_save_used: bool = False
+    commissar_action_mode: str | None = None
+    commissar_target_id: int | None = None
+    commissar_shot_target_id: int | None = None
+    commissar_known_roles: dict[int, str] = field(default_factory=dict)
+    pending_sergeant_check: dict[str, object] | None = None
+    advocate_target_id: int | None = None
+    maniac_target_id: int | None = None
+    mistress_target_id: int | None = None
+    mistress_last_target_id: int | None = None
+    bum_target_id: int | None = None
+    bum_last_target_id: int | None = None
+    kamikaze_pending_user_id: int | None = None
+    kamikaze_target_id: int | None = None
+    documented_user_ids: set[int] = field(default_factory=set)
+    spent_documents_user_ids: set[int] = field(default_factory=set)
+    shielded_user_ids: set[int] = field(default_factory=set)
+    spent_shield_user_ids: set[int] = field(default_factory=set)
+    active_role_queued_user_ids: set[int] = field(default_factory=set)
+    active_role_triggered_user_ids: set[int] = field(default_factory=set)
+    active_role_failed_user_ids: set[int] = field(default_factory=set)
+    night_missed_streaks: dict[int, int] = field(default_factory=dict)
+    afk_killed_user_ids: set[int] = field(default_factory=set)
+    night_reports: dict[int, list[str]] = field(default_factory=dict)
+    pending_last_words: set[int] = field(default_factory=set)
+    used_last_words: set[int] = field(default_factory=set)
+    last_words_log: dict[int, str] = field(default_factory=dict)
+    last_doctor_saved_target_id: int | None = None
+    phase_started_at: datetime | None = None
+    phase_duration_seconds: int | None = None
+    stats_recorded: bool = False
+    suicide_winners: set[int] = field(default_factory=set)
+    winner_team: str | None = None
+    started_at: datetime | None = None
+    finished_at: datetime | None = None
+
+
 # Route extracted behavior through focused domain modules while keeping the
-# original GameRoom class identity used by storage and handlers.
+# public GameRoom API unchanged.
 GameRoom.add_player = add_player
 GameRoom.open_registration = open_registration
 GameRoom.extend_registration = extend_registration
