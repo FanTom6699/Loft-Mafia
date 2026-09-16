@@ -6,6 +6,19 @@ individual behavior is extracted into focused domain modules.
 
 from ..game_legacy import GameRoom, Player
 from .assignment import assign_roles, build_roles
+from .day_flow import (
+    _reset_for_night_transition,
+    all_alive_day_voted,
+    all_alive_trial_voted,
+    end_day_no_lynch,
+    resolve_day_nomination,
+    resolve_day_trial,
+    set_trial_vote,
+    start_day_discussion,
+    start_day_nomination,
+    start_day_trial,
+    trial_vote_counts,
+)
 from .lobby import (
     add_player,
     close_registration,
@@ -45,6 +58,19 @@ GameRoom.close_registration = close_registration
 GameRoom.remove_player = remove_player
 GameRoom.assign_roles = assign_roles
 GameRoom.build_roles = staticmethod(build_roles)
+
+GameRoom.all_alive_day_voted = all_alive_day_voted
+GameRoom.all_alive_trial_voted = all_alive_trial_voted
+GameRoom.start_day_discussion = start_day_discussion
+GameRoom.start_day_nomination = start_day_nomination
+GameRoom.start_day_trial = start_day_trial
+GameRoom.resolve_day_nomination = resolve_day_nomination
+GameRoom.set_trial_vote = set_trial_vote
+GameRoom.trial_vote_counts = trial_vote_counts
+GameRoom._reset_for_night_transition = _reset_for_night_transition
+GameRoom.end_day_no_lynch = end_day_no_lynch
+GameRoom.resolve_day_trial = resolve_day_trial
+
 GameRoom.set_night_vote = set_night_vote
 GameRoom.set_doctor_target = set_doctor_target
 GameRoom.set_kamikaze_target = set_kamikaze_target
