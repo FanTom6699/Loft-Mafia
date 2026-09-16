@@ -24,6 +24,17 @@ from .constants import (
 from .roles import ROLE_EMOJI, invisible_mode_from_settings, normalize_link_display_name, player_link
 
 
+def seat_number(self, user_id: int) -> int | None:
+    for index, player in enumerate(self.players.values(), start=1):
+        if player.user_id == user_id:
+            return index
+    return None
+
+
+def anonymous_player_label(self, player) -> str:
+    return "Невидимка"
+
+
 def public_player_mark(self, player) -> str:
     if invisible_mode_from_settings(self.settings):
         return escape(self.anonymous_player_label(player))
