@@ -90,6 +90,8 @@ class GameDomainCompatibilityTests(unittest.TestCase):
 
     def test_presentation_methods_are_from_domain_module(self) -> None:
         expected = (
+            "seat_number",
+            "anonymous_player_label",
             "public_player_mark",
             "commissar_check_result_text",
             "pop_night_reports",
@@ -116,6 +118,16 @@ class GameDomainCompatibilityTests(unittest.TestCase):
         for method_name in expected:
             with self.subTest(method_name=method_name):
                 self.assertEqual(getattr(GameRoom, method_name).__module__, "mafia_bot.game_domain.presentation")
+
+    def test_seat_and_anonymous_helpers_keep_original_behavior(self) -> None:
+        room = GameRoom(chat_id=123, host_id=456)
+        room.players[10] = Player(user_id=10, full_name="First")
+        room.players[20] = Player(user_id=20, full_name="Second")
+
+        self.assertEqual(room.seat_number(10), 1)
+        self.assertEqual(room.seat_number(20), 2)
+        self.assertIsNone(room.seat_number(999))
+        self.assertEqual(room.anonymous_player_label(room.players[10]), "Невидимка")
 
     def test_role_plan_keeps_expected_size(self) -> None:
         for player_count, roles in ROLE_PLAN_BY_COUNT.items():
