@@ -48,6 +48,25 @@ from .night_state import (
     pop_spent_shield_user_ids,
     set_night_skip,
 )
+from .player_state import (
+    _active_mafia_votes,
+    _choose_mafia_target,
+    alive_civilians,
+    alive_mafia,
+    alive_mafia_ids,
+    alive_players,
+    all_mafia_voted,
+    check_winner,
+    current_mafia_target_id,
+    forget_dead_commissar_checks,
+    get_player,
+    mark_night_role_announced,
+    pop_pending_sergeant_check,
+    remember_commissar_check,
+    set_pending_sergeant_check,
+    transfer_commissar_if_needed,
+    transfer_don_if_needed,
+)
 
 # Route extracted behavior through focused domain modules while keeping the
 # original GameRoom class identity used by storage and handlers.
@@ -58,6 +77,24 @@ GameRoom.close_registration = close_registration
 GameRoom.remove_player = remove_player
 GameRoom.assign_roles = assign_roles
 GameRoom.build_roles = staticmethod(build_roles)
+
+GameRoom.get_player = get_player
+GameRoom.alive_players = alive_players
+GameRoom.alive_mafia = alive_mafia
+GameRoom.alive_mafia_ids = alive_mafia_ids
+GameRoom.all_mafia_voted = all_mafia_voted
+GameRoom._active_mafia_votes = _active_mafia_votes
+GameRoom._choose_mafia_target = _choose_mafia_target
+GameRoom.current_mafia_target_id = current_mafia_target_id
+GameRoom.mark_night_role_announced = mark_night_role_announced
+GameRoom.transfer_don_if_needed = transfer_don_if_needed
+GameRoom.transfer_commissar_if_needed = transfer_commissar_if_needed
+GameRoom.remember_commissar_check = remember_commissar_check
+GameRoom.set_pending_sergeant_check = set_pending_sergeant_check
+GameRoom.pop_pending_sergeant_check = pop_pending_sergeant_check
+GameRoom.forget_dead_commissar_checks = forget_dead_commissar_checks
+GameRoom.alive_civilians = alive_civilians
+GameRoom.check_winner = check_winner
 
 GameRoom.all_alive_day_voted = all_alive_day_voted
 GameRoom.all_alive_trial_voted = all_alive_trial_voted
