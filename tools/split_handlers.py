@@ -7,6 +7,13 @@ SRC = MAFIA / 'handlers.py'
 PKG = MAFIA / 'handlers'
 LEGACY = MAFIA / 'handlers_legacy.py'
 
+# Idempotent: once the split is generated, later CI runs do nothing.
+if not SRC.exists():
+    if PKG.exists() and LEGACY.exists():
+        print(f'Handler split already exists: {PKG}')
+        raise SystemExit(0)
+    raise SystemExit('mafia_bot/handlers.py is missing and no completed split was found')
+
 if SRC.exists() and not LEGACY.exists():
     shutil.copy2(SRC, LEGACY)
 
@@ -18,8 +25,8 @@ context_end = first_fn.lineno - 1 if first_fn else len(lines)
 context = ''.join(lines[:context_end])
 
 roles = {
-    'common': '''cancel_registration_timer current_day_stage_seconds clear_chat_penalties persist_room remove_room_state role_mark_text room_player_mark room_player_label private_game_send_kwargs night_role_announcement_text track_action_menu_message get_action_menu_message_id clear_action_menu_messages clear_registration_panel_message clear_registration_notice_message upsert_registration_warning_message clear_registration_warning_message resolve_phase_image_path send_phase_media safe_send_message skipped_turn_keyboard locked_choice_keyboard skip_turn_button_text skip_turn_selected_text locked_choice_text night_skipped_user_ids mark_skipped_night_menus format_killer_sources_text ensure_stats_recorded prime_room_documents prime_room_shields apply_room_active_role_buffs send_endgame_currency_summaries notify_missing_delete_permission_once safe_delete_message cleanup_group_command_message delete_message_later should_send_chat_welcome send_group_welcome get_or_create_penalty is_user_blocked blocked_seconds_left notify_registration_blocked is_group_admin is_group_settings_admin bot_has_delete_permission process_rule_violation user_nickname player_display_name normalize_link_display_name player_profile_link user_profile_link_by_id get_private_action_room get_player_profile_room get_pending_last_word_room notify_room_private_cancellation announce_don_transfer announce_commissar_transfer cmd_panel on_owner_exit_phrase on_developer_phrase enforce_group_game_rules''',
-    'lobby': '''registration_remaining_seconds start_registration_timer launch_game_from_registration maybe_launch_full_lobby process_registration_timeout registration_join_link bot_start_link registration_text registration_post_text private_bot_link refresh_registration_post pin_registration_post clear_registration_post registration_lobby_keyboard registration_panel cmd_start on_new_chat_members on_chat_member_joined cmd_roles cmd_create cmd_join cmd_leave cmd_lobby cmd_extend cmd_stop cmd_begin on_registration_action cmd_status cmd_id''',
+    'common': '''cancel_registration_timer current_day_stage_seconds clear_chat_penalties persist_room remove_room_state role_mark_text room_player_mark room_player_label private_game_send_kwargs night_role_announcement_text track_action_menu_message get_action_menu_message_id clear_action_menu_messages clear_registration_panel_message clear_registration_notice_message upsert_registration_warning_message clear_registration_warning_message resolve_phase_image_path send_phase_media safe_send_message skipped_turn_keyboard locked_choice_keyboard skip_turn_button_text skip_turn_selected_text locked_choice_text night_skipped_user_ids mark_skipped_night_menus format_killer_sources_text ensure_stats_recorded prime_room_documents prime_room_shields apply_room_active_role_buffs send_endgame_currency_summaries notify_missing_delete_permission_once safe_delete_message cleanup_group_command_message delete_message_later should_send_chat_welcome send_group_welcome get_or_create_penalty is_user_blocked blocked_seconds_left notify_registration_blocked is_group_admin is_group_settings_admin bot_has_delete_permission process_rule_violation user_nickname player_nickname player_display_name normalize_link_display_name player_profile_link user_profile_link_by_id get_private_action_room get_player_profile_room get_pending_last_word_room notify_room_private_cancellation announce_don_transfer announce_commissar_transfer cmd_panel on_owner_exit_phrase on_developer_phrase enforce_group_game_rules''',
+    'lobby': '''registration_remaining_seconds start_registration_timer launch_game_from_registration maybe_launch_full_lobby process_registration_timeout registration_join_link bot_start_link registration_text registration_post_text private_bot_link refresh_registration_post pin_registration_post clear_registration_post registration_lobby_keyboard cmd_start on_new_chat_members on_chat_member_joined cmd_roles cmd_create cmd_join cmd_leave cmd_lobby cmd_extend cmd_stop cmd_begin on_registration_action cmd_status cmd_id''',
     'game': '''get_phase_lock cancel_phase_timer process_night_end process_day_end phase_timer_worker start_phase_timer restore_runtime_state maybe_finish_phase_early''',
     'day': '''trial_vote_prompt_text trial_vote_keyboard push_trial_vote_menus finish_trial_vote_message prompt_last_words on_trial_callback''',
     'profile': '''format_player_stats_text top_period_keyboard format_top_text format_endgame_currency_text format_private_profile_text format_buffs_shop_text format_buff_details_text private_main_menu_keyboard private_profile_keyboard private_back_to_menu_keyboard private_buffs_shop_keyboard private_buff_details_keyboard private_roles_keyboard private_back_to_roles_keyboard private_role_details_text role_card_for_player cmd_stats send_top_to_private cmd_top cmd_profile''',
@@ -40,6 +47,7 @@ for n in tree.body:
         nodes.append((n.name, ''.join(lines[start:end])))
 
 assigned = set()
+PKG.mkdir(exist_ok=True)
 for mod, names in roles.items():
     chunks = []
     for name, text in nodes:
