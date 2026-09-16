@@ -5,4 +5,5 @@ remains as the stable import path for existing handlers, storage code, and
 external integrations.
 """
 
+# Compatibility facade: keep the legacy public import path stable.
 from .game_domain import *
