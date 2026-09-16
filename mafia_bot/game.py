@@ -1,9 +1,8 @@
-"""Compatibility facade for the historical Mafia game API.
+"""Public compatibility facade for the Mafia game domain.
 
-The implementation is temporarily kept in ``game_legacy`` while the domain
-model is moved into ``game_domain`` in small, testable steps. Existing imports
-from ``mafia_bot.game`` therefore keep working during the refactor.
+The implementation now lives in ``mafia_bot.game_domain``.  This module
+remains as the stable import path for existing handlers, storage code, and
+external integrations.
 """
 
-from .game_legacy import *
 from .game_domain import *
