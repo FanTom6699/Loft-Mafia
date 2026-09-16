@@ -15,8 +15,9 @@ from .constants import (
 )
 
 
-# User-facing messages are kept identical to the wording used by the original
-# handlers/game flow. Telegram delivery itself remains in handlers.py.
+# These validation/status strings are intentionally kept compatible with the
+# historical GameRoom API. Telegram-facing phase announcements remain in
+# handlers.py, where the original UI wording is defined.
 CANDIDATE_NOT_FOUND_TEXT = "Кандидат не найден. День завершается без повешения."
 TRIAL_VOTE_REJECTED_TEXT = "Сейчас не идет голосование за/против."
 PLAYER_NOT_FOUND_TEXT = "Игрок не найден."
@@ -166,7 +167,7 @@ def end_day_no_lynch(self) -> tuple[bool, str]:
         return True, f"Игра окончена. Победила команда: {winner}."
     self.phase = PHASE_NIGHT
     self.round_no += 1
-    return True, "Голосование окончено\n🗿 Жители решили никого не вешать..."
+    return True, "Сегодня решили никого не вешать. Наступает ночь."
 
 
 def resolve_day_trial(self) -> tuple[bool, str, list, str | None, int | None, str | None, int | None]:
@@ -217,10 +218,7 @@ def resolve_day_trial(self) -> tuple[bool, str, list, str | None, int | None, st
     if not eliminated:
         return (
             True,
-            "Мнения жителей разошлись\n(<b>{yes_count}</b> 👍 | <b>{no_count}</b> 👎 )... Разошлись и сами жители, так никого и не повесив...".format(
-                yes_count=yes_count,
-                no_count=no_count,
-            ),
+            "Большинством голосов игрока оставили в живых. Наступает ночь.",
             [],
             don_transfer_note,
             don_successor_id,
