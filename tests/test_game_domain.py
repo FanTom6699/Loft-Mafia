@@ -42,6 +42,15 @@ class GameDomainCompatibilityTests(unittest.TestCase):
     def test_night_resolution_is_from_domain_module(self) -> None:
         self.assertEqual(GameRoom.resolve_night.__module__, "mafia_bot.game_domain.night_resolution")
 
+    def test_night_state_methods_are_from_domain_module(self) -> None:
+        self.assertEqual(GameRoom.all_required_night_actions_done.__module__, "mafia_bot.game_domain.night_state")
+        self.assertEqual(GameRoom.can_skip_night_action.__module__, "mafia_bot.game_domain.night_state")
+        self.assertEqual(GameRoom.set_night_skip.__module__, "mafia_bot.game_domain.night_state")
+        self.assertEqual(GameRoom.arm_shield.__module__, "mafia_bot.game_domain.night_state")
+        self.assertEqual(GameRoom.arm_documents.__module__, "mafia_bot.game_domain.night_state")
+        self.assertEqual(GameRoom.pop_spent_documents_user_ids.__module__, "mafia_bot.game_domain.night_state")
+        self.assertEqual(GameRoom.pop_spent_shield_user_ids.__module__, "mafia_bot.game_domain.night_state")
+
     def test_room_starts_empty_and_can_open_registration(self) -> None:
         room = GameRoom(chat_id=123, host_id=456)
         self.assertEqual(room.players, {})
