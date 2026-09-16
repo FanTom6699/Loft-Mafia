@@ -4,20 +4,24 @@ from __future__ import annotations
 
 from datetime import datetime
 from html import escape
+import random
 
 from .constants import (
-    DAY_STAGE_DISCUSSION,
-    GAME_MODE_INVISIBLE,
+    DAY_STAGE_NOMINATION,
     PHASE_DAY,
     PHASE_FINISHED,
     PHASE_LOBBY,
     PHASE_NIGHT,
     ROLE_ADVOCATE,
-    ROLE_EMOJI,
+    ROLE_CITIZEN,
+    ROLE_COMMISSAR,
+    ROLE_DON,
+    ROLE_KAMIKAZE,
     ROLE_MAFIA,
     ROLE_MANIAC,
+    ROLE_SUICIDE,
 )
-from .roles import invisible_mode_from_settings, normalize_link_display_name, player_link
+from .roles import ROLE_EMOJI, invisible_mode_from_settings, normalize_link_display_name, player_link
 
 
 def public_player_mark(self, player) -> str:
@@ -79,7 +83,7 @@ def consume_last_word(self, user_id: int, text: str) -> tuple[bool, str]:
 def set_day_vote(self, voter_user_id: int, target_user_id: int) -> tuple[bool, str]:
     if self.phase != PHASE_DAY:
         return False, "Сейчас не день."
-    if self.day_stage != "nomination":
+    if self.day_stage != DAY_STAGE_NOMINATION:
         return False, "Сейчас не этап выбора кандидата."
 
     voter = self.get_player(voter_user_id)
@@ -119,13 +123,12 @@ def resolve_day(self) -> tuple[bool, str, list, str | None, int | None]:
         if first and first.alive:
             first.alive = False
             eliminated.append(first)
-            if first.role == "Самоубийца":
+            if first.role == ROLE_SUICIDE:
                 self.suicide_winners.add(first.user_id)
 
-            if first.role == "Камикадзе":
+            if first.role == ROLE_KAMIKAZE:
                 candidates = [p for p in self.alive_players() if p.user_id != first.user_id]
                 if candidates:
-                    import random
                     extra = random.choice(candidates)
                     extra.alive = False
                     eliminated.append(extra)
@@ -134,8 +137,8 @@ def resolve_day(self) -> tuple[bool, str, list, str | None, int | None]:
 
     don_transfer_note: str | None = None
     don_successor_id: int | None = None
-    if any(player.role == "Дон" for player in eliminated):
-        if eliminated and eliminated[0].role == "Дон":
+    if any(player.role == ROLE_DON for player in eliminated):
+        if eliminated and eliminated[0].role == ROLE_DON:
             reason = "казни Дона на голосовании"
         else:
             reason = "дневной гибели Дона"
@@ -257,12 +260,12 @@ def final_report_text(self) -> str:
 
     for player in self.players.values():
         is_winner = (
-            winner == "Мафия" and (player.role in {"Дон", ROLE_MAFIA} or player.role == ROLE_ADVOCATE)
+            winner == "Мафия" and (player.role in MAFIA_ROLES or player.role == ROLE_ADVOCATE)
         ) or (
             winner == "Маньяк" and player.role == ROLE_MANIAC
         ) or (
             winner == "Мирные жители"
-            and player.role not in {"Дон", ROLE_MAFIA}
+            and player.role not in MAFIA_ROLES
             and player.role != ROLE_MANIAC
             and player.role != ROLE_ADVOCATE
         )
