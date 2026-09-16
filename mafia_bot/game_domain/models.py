@@ -72,6 +72,7 @@ from .presentation import (
     alive_players_text,
     alive_role_counts_text,
     alive_role_hints_text,
+    anonymous_player_label,
     can_send_last_word,
     commissar_check_result_text,
     consume_last_word,
@@ -88,6 +89,7 @@ from .presentation import (
     public_player_mark,
     queue_last_words,
     resolve_day,
+    seat_number,
     set_day_vote,
     status_text,
 )
@@ -151,6 +153,8 @@ GameRoom.arm_documents = arm_documents
 GameRoom.pop_spent_documents_user_ids = pop_spent_documents_user_ids
 GameRoom.pop_spent_shield_user_ids = pop_spent_shield_user_ids
 
+GameRoom.seat_number = seat_number
+GameRoom.anonymous_player_label = anonymous_player_label
 GameRoom.public_player_mark = public_player_mark
 GameRoom.commissar_check_result_text = commissar_check_result_text
 GameRoom.pop_night_reports = pop_night_reports
