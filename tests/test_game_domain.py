@@ -51,6 +51,23 @@ class GameDomainCompatibilityTests(unittest.TestCase):
         self.assertEqual(GameRoom.pop_spent_documents_user_ids.__module__, "mafia_bot.game_domain.night_state")
         self.assertEqual(GameRoom.pop_spent_shield_user_ids.__module__, "mafia_bot.game_domain.night_state")
 
+    def test_day_flow_methods_are_from_domain_module(self) -> None:
+        expected = (
+            "all_alive_day_voted",
+            "all_alive_trial_voted",
+            "start_day_discussion",
+            "start_day_nomination",
+            "start_day_trial",
+            "resolve_day_nomination",
+            "set_trial_vote",
+            "trial_vote_counts",
+            "end_day_no_lynch",
+            "resolve_day_trial",
+        )
+        for method_name in expected:
+            with self.subTest(method_name=method_name):
+                self.assertEqual(getattr(GameRoom, method_name).__module__, "mafia_bot.game_domain.day_flow")
+
     def test_room_starts_empty_and_can_open_registration(self) -> None:
         room = GameRoom(chat_id=123, host_id=456)
         self.assertEqual(room.players, {})
@@ -84,6 +101,49 @@ class GameDomainCompatibilityTests(unittest.TestCase):
         self.assertIn(ROLE_MAFIA, assigned_roles)
         self.assertIn(ROLE_CITIZEN, assigned_roles)
         self.assertIsNotNone(room.started_at)
+
+    def test_day_nomination_flow(self) -> None:
+        room = GameRoom(chat_id=123, host_id=456)
+        room.phase = "day"
+        room.start_day_nomination()
+        for user_id in range(1, 5):
+            room.players[user_id] = Player(user_id=user_id, full_name=f"Player {user_id}")
+
+        room.day_votes = {1: 2, 2: 2, 3: 2, 4: 3}
+        self.assertTrue(room.all_alive_day_voted())
+        ok, candidate_id = room.resolve_day_nomination()
+        self.assertTrue(ok)
+        self.assertEqual(candidate_id, 2)
+
+    def test_day_trial_flow(self) -> None:
+        room = GameRoom(chat_id=123, host_id=456)
+        room.phase = "day"
+        for user_id in range(1, 5):
+            room.players[user_id] = Player(user_id=user_id, full_name=f"Player {user_id}")
+
+        ok, message = room.start_day_trial(1)
+        self.assertTrue(ok)
+        self.assertEqual(room.day_stage, "trial")
+        self.assertEqual(message, "Этап голосования за/против запущен.")
+
+        self.assertEqual(room.set_trial_vote(2, True), (True, "Твой голос принят."))
+        self.assertEqual(room.set_trial_vote(3, True), (True, "Твой голос принят."))
+        self.assertEqual(room.set_trial_vote(4, False), (True, "Твой голос принят."))
+        self.assertTrue(room.all_alive_trial_voted())
+        self.assertEqual(room.trial_vote_counts(), (2, 1))
+
+    def test_day_no_lynch_transitions_to_night(self) -> None:
+        room = GameRoom(chat_id=123, host_id=456)
+        room.phase = "day"
+        room.round_no = 2
+        room.start_day_discussion()
+
+        ok, message = room.end_day_no_lynch()
+
+        self.assertTrue(ok)
+        self.assertEqual(message, "Сегодня решили никого не вешать. Наступает ночь.")
+        self.assertEqual(room.phase, "night")
+        self.assertEqual(room.round_no, 3)
 
     def test_domain_storage_manages_rooms(self) -> None:
         storage = GameStorage()
