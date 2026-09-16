@@ -209,6 +209,10 @@ class GameDomainCompatibilityTests(unittest.TestCase):
         room = GameRoom(chat_id=123, host_id=456)
         room.phase = "day"
         room.round_no = 2
+        room.players[1] = Player(user_id=1, full_name="Mafia", role=ROLE_MAFIA)
+        room.players[2] = Player(user_id=2, full_name="Citizen 2", role=ROLE_CITIZEN)
+        room.players[3] = Player(user_id=3, full_name="Citizen 3", role=ROLE_CITIZEN)
+        room.players[4] = Player(user_id=4, full_name="Citizen 4", role=ROLE_CITIZEN)
         room.start_day_discussion()
 
         ok, message = room.end_day_no_lynch()
