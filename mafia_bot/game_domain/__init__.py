@@ -19,6 +19,15 @@ from .night_actions import (
     set_night_vote,
 )
 from .night_resolution import resolve_night
+from .night_state import (
+    all_required_night_actions_done,
+    arm_documents,
+    arm_shield,
+    can_skip_night_action,
+    pop_spent_documents_user_ids,
+    pop_spent_shield_user_ids,
+    set_night_skip,
+)
 from .models import GameRoom, Player
 from .storage import GameStorage
 
