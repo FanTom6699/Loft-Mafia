@@ -25,6 +25,7 @@ from .night_actions import (
     set_mistress_target,
     set_night_vote,
 )
+from .night_resolution import resolve_night
 
 # Route extracted behavior through focused domain modules while keeping the
 # original GameRoom class identity used by storage and handlers.
@@ -45,5 +46,6 @@ GameRoom.check_player_role = check_player_role
 GameRoom.set_commissar_action_mode = set_commissar_action_mode
 GameRoom.set_commissar_shot_target = set_commissar_shot_target
 GameRoom.set_advocate_target = set_advocate_target
+GameRoom.resolve_night = resolve_night
 
 __all__ = ["Player", "GameRoom"]
