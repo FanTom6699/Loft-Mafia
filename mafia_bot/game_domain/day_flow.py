@@ -15,9 +15,8 @@ from .constants import (
 )
 
 
-# These strings mirror the user-facing wording used by the original
-# ``handlers.py``.  The handler remains responsible for sending them to
-# Telegram; the domain only returns status information to its caller.
+# User-facing messages are kept identical to the wording used by the original
+# handlers/game flow. Telegram delivery itself remains in handlers.py.
 CANDIDATE_NOT_FOUND_TEXT = "Кандидат не найден. День завершается без повешения."
 TRIAL_VOTE_REJECTED_TEXT = "Сейчас не идет голосование за/против."
 PLAYER_NOT_FOUND_TEXT = "Игрок не найден."
@@ -75,7 +74,7 @@ def start_day_trial(self, candidate_user_id: int) -> tuple[bool, str]:
     self.trial_candidate_id = candidate_user_id
     self.trial_vote_message_id = None
     self.trial_votes.clear()
-    return True, TRIAL_VOTE_ACCEPTED_TEXT
+    return True, "Этап голосования за/против запущен."
 
 
 def resolve_day_nomination(self) -> tuple[bool, int | None]:
