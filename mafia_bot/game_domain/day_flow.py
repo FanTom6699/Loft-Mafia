@@ -15,6 +15,18 @@ from .constants import (
 )
 
 
+# These strings mirror the user-facing wording used by the original
+# ``handlers.py``.  The handler remains responsible for sending them to
+# Telegram; the domain only returns status information to its caller.
+CANDIDATE_NOT_FOUND_TEXT = "Кандидат не найден. День завершается без повешения."
+TRIAL_VOTE_REJECTED_TEXT = "Сейчас не идет голосование за/против."
+PLAYER_NOT_FOUND_TEXT = "Игрок не найден."
+PLAYER_ELIMINATED_TEXT = "Ты выбыл из игры."
+MISTRESS_DAY_BLOCK_TEXT = '"Ты со мною забудь обо всём...", - пела 💃🏼 Любовница'
+CANDIDATE_CANNOT_VOTE_TEXT = "Кандидат на повешение не может голосовать за/против."
+TRIAL_VOTE_ACCEPTED_TEXT = "Твой голос принят."
+
+
 def all_alive_day_voted(self) -> bool:
     if self.phase != PHASE_DAY or self.day_stage != DAY_STAGE_NOMINATION:
         return False
@@ -58,12 +70,12 @@ def start_day_nomination(self) -> None:
 def start_day_trial(self, candidate_user_id: int) -> tuple[bool, str]:
     candidate = self.get_player(candidate_user_id)
     if candidate is None or not candidate.alive:
-        return False, "Кандидат на повешение не найден."
+        return False, CANDIDATE_NOT_FOUND_TEXT
     self.day_stage = DAY_STAGE_TRIAL
     self.trial_candidate_id = candidate_user_id
     self.trial_vote_message_id = None
     self.trial_votes.clear()
-    return True, "Этап голосования за/против запущен."
+    return True, TRIAL_VOTE_ACCEPTED_TEXT
 
 
 def resolve_day_nomination(self) -> tuple[bool, int | None]:
@@ -99,18 +111,18 @@ def resolve_day_nomination(self) -> tuple[bool, int | None]:
 
 def set_trial_vote(self, voter_user_id: int, approve: bool) -> tuple[bool, str]:
     if self.phase != PHASE_DAY or self.day_stage != DAY_STAGE_TRIAL:
-        return False, "Сейчас не идет голосование за/против."
+        return False, TRIAL_VOTE_REJECTED_TEXT
     voter = self.get_player(voter_user_id)
     if voter is None:
-        return False, "Игрок не найден."
+        return False, PLAYER_NOT_FOUND_TEXT
     if not voter.alive:
-        return False, "Ты выбыл из игры."
+        return False, PLAYER_ELIMINATED_TEXT
     if self.day_silenced_user_id is not None and voter.user_id == self.day_silenced_user_id:
-        return False, '"Ты со мною забудь обо всём...", - пела 💃🏼 Любовница'
+        return False, MISTRESS_DAY_BLOCK_TEXT
     if self.trial_candidate_id is not None and voter.user_id == self.trial_candidate_id:
-        return False, "Кандидат на повешение не может голосовать за/против."
+        return False, CANDIDATE_CANNOT_VOTE_TEXT
     self.trial_votes[voter_user_id] = approve
-    return True, "Твой голос принят."
+    return True, TRIAL_VOTE_ACCEPTED_TEXT
 
 
 def trial_vote_counts(self) -> tuple[int, int]:
@@ -155,7 +167,7 @@ def end_day_no_lynch(self) -> tuple[bool, str]:
         return True, f"Игра окончена. Победила команда: {winner}."
     self.phase = PHASE_NIGHT
     self.round_no += 1
-    return True, "Сегодня решили никого не вешать. Наступает ночь."
+    return True, "Голосование окончено\n🗿 Жители решили никого не вешать..."
 
 
 def resolve_day_trial(self) -> tuple[bool, str, list, str | None, int | None, str | None, int | None]:
@@ -189,15 +201,42 @@ def resolve_day_trial(self) -> tuple[bool, str, list, str | None, int | None, st
     self._reset_for_night_transition()
     winner = self.check_winner()
     if winner:
-        return (True, f"Игра окончена. Победила команда: {winner}.", eliminated, don_transfer_note, don_successor_id, commissar_transfer_note, commissar_successor_id)
+        return (
+            True,
+            f"Игра окончена. Победила команда: {winner}.",
+            eliminated,
+            don_transfer_note,
+            don_successor_id,
+            commissar_transfer_note,
+            commissar_successor_id,
+        )
     self.phase = PHASE_NIGHT
     self.round_no += 1
     if kamikaze_needs_revenge and kamikaze_user_id is not None:
         self.kamikaze_pending_user_id = kamikaze_user_id
         self.kamikaze_target_id = None
     if not eliminated:
-        return (True, "Большинством голосов игрока оставили в живых. Наступает ночь.", [], don_transfer_note, don_successor_id, commissar_transfer_note, commissar_successor_id)
-    return (True, "По итогам голосования игрок повешен. Наступает ночь.", eliminated, don_transfer_note, don_successor_id, commissar_transfer_note, commissar_successor_id)
+        return (
+            True,
+            "Мнения жителей разошлись\n(<b>{yes_count}</b> 👍 | <b>{no_count}</b> 👎 )... Разошлись и сами жители, так никого и не повесив...".format(
+                yes_count=yes_count,
+                no_count=no_count,
+            ),
+            [],
+            don_transfer_note,
+            don_successor_id,
+            commissar_transfer_note,
+            commissar_successor_id,
+        )
+    return (
+        True,
+        "По итогам голосования игрок повешен. Наступает ночь.",
+        eliminated,
+        don_transfer_note,
+        don_successor_id,
+        commissar_transfer_note,
+        commissar_successor_id,
+    )
 
 
 __all__ = [
