@@ -39,6 +39,9 @@ class GameDomainCompatibilityTests(unittest.TestCase):
         self.assertEqual(GameRoom.set_commissar_shot_target.__module__, "mafia_bot.game_domain.night_actions")
         self.assertEqual(GameRoom.set_kamikaze_target.__module__, "mafia_bot.game_domain.night_actions")
 
+    def test_night_resolution_is_from_domain_module(self) -> None:
+        self.assertEqual(GameRoom.resolve_night.__module__, "mafia_bot.game_domain.night_resolution")
+
     def test_room_starts_empty_and_can_open_registration(self) -> None:
         room = GameRoom(chat_id=123, host_id=456)
         self.assertEqual(room.players, {})
