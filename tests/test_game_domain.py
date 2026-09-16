@@ -27,6 +27,28 @@ class GameDomainCompatibilityTests(unittest.TestCase):
         self.assertEqual(GameRoom.assign_roles.__module__, "mafia_bot.game_domain.assignment")
         self.assertEqual(GameRoom.build_roles.__module__, "mafia_bot.game_domain.assignment")
 
+    def test_player_state_methods_are_from_domain_module(self) -> None:
+        expected = (
+            "get_player",
+            "alive_players",
+            "alive_mafia",
+            "alive_mafia_ids",
+            "all_mafia_voted",
+            "current_mafia_target_id",
+            "mark_night_role_announced",
+            "transfer_don_if_needed",
+            "transfer_commissar_if_needed",
+            "remember_commissar_check",
+            "set_pending_sergeant_check",
+            "pop_pending_sergeant_check",
+            "forget_dead_commissar_checks",
+            "alive_civilians",
+            "check_winner",
+        )
+        for method_name in expected:
+            with self.subTest(method_name=method_name):
+                self.assertEqual(getattr(GameRoom, method_name).__module__, "mafia_bot.game_domain.player_state")
+
     def test_night_action_methods_are_from_domain_module(self) -> None:
         self.assertEqual(GameRoom.set_night_vote.__module__, "mafia_bot.game_domain.night_actions")
         self.assertEqual(GameRoom.set_doctor_target.__module__, "mafia_bot.game_domain.night_actions")
