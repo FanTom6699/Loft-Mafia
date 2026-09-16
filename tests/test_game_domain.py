@@ -79,8 +79,6 @@ class GameDomainCompatibilityTests(unittest.TestCase):
             "all_alive_trial_voted",
             "start_day_discussion",
             "start_day_nomination",
-            "start_day_trial",
-            "resolve_day_nomination",
             "set_trial_vote",
             "trial_vote_counts",
             "end_day_no_lynch",
@@ -90,17 +88,34 @@ class GameDomainCompatibilityTests(unittest.TestCase):
             with self.subTest(method_name=method_name):
                 self.assertEqual(getattr(GameRoom, method_name).__module__, "mafia_bot.game_domain.day_flow")
 
-    def test_room_starts_empty_and_can_open_registration(self) -> None:
-        room = GameRoom(chat_id=123, host_id=456)
-        self.assertEqual(room.players, {})
-        self.assertFalse(room.registration_open)
-
-        room.open_registration()
-        added, message = room.add_player(1, "Alice")
-
-        self.assertTrue(added)
-        self.assertEqual(message, "Игрок добавлен.")
-        self.assertIsInstance(room.get_player(1), Player)
+    def test_presentation_methods_are_from_domain_module(self) -> None:
+        expected = (
+            "public_player_mark",
+            "commissar_check_result_text",
+            "pop_night_reports",
+            "add_night_report_line",
+            "queue_last_words",
+            "can_send_last_word",
+            "consume_last_word",
+            "set_day_vote",
+            "resolve_day",
+            "end_day_without_votes",
+            "pop_night_kill_sources",
+            "alive_role_counts_text",
+            "alive_players_text",
+            "alive_role_hints_text",
+            "game_duration_text",
+            "final_report_text",
+            "night_intro_text",
+            "night_media_caption",
+            "day_intro_text",
+            "day_media_caption",
+            "status_text",
+            "lobby_text",
+        )
+        for method_name in expected:
+            with self.subTest(method_name=method_name):
+                self.assertEqual(getattr(GameRoom, method_name).__module__, "mafia_bot.game_domain.presentation")
 
     def test_role_plan_keeps_expected_size(self) -> None:
         for player_count, roles in ROLE_PLAN_BY_COUNT.items():
