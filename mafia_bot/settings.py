@@ -1,0 +1,43 @@
+"""Handler facade for the settings area.
+
+Stage 1 keeps runtime compatibility: implementations remain in
+``mafia_bot._handlers_legacy`` and are re-exported here.
+"""
+
+from .. import _handlers_legacy as _legacy
+
+format_buffs_shop_text = _legacy.format_buffs_shop_text
+format_buff_details_text = _legacy.format_buff_details_text
+prime_room_documents = _legacy.prime_room_documents
+prime_room_shields = _legacy.prime_room_shields
+apply_room_active_role_buffs = _legacy.apply_room_active_role_buffs
+private_main_menu_keyboard = _legacy.private_main_menu_keyboard
+private_profile_keyboard = _legacy.private_profile_keyboard
+private_back_to_menu_keyboard = _legacy.private_back_to_menu_keyboard
+private_buffs_shop_keyboard = _legacy.private_buffs_shop_keyboard
+private_buff_details_keyboard = _legacy.private_buff_details_keyboard
+private_roles_keyboard = _legacy.private_roles_keyboard
+private_back_to_roles_keyboard = _legacy.private_back_to_roles_keyboard
+private_role_details_text = _legacy.private_role_details_text
+private_settings_main_keyboard = _legacy.private_settings_main_keyboard
+private_settings_game_mode_keyboard = _legacy.private_settings_game_mode_keyboard
+private_settings_roles_keyboard = _legacy.private_settings_roles_keyboard
+private_settings_role_toggle_keyboard = _legacy.private_settings_role_toggle_keyboard
+private_settings_roles_text = _legacy.private_settings_roles_text
+private_settings_role_toggle_text = _legacy.private_settings_role_toggle_text
+private_settings_timings_keyboard = _legacy.private_settings_timings_keyboard
+private_settings_timing_values_keyboard = _legacy.private_settings_timing_values_keyboard
+private_settings_mute_keyboard = _legacy.private_settings_mute_keyboard
+private_settings_mute_toggle_keyboard = _legacy.private_settings_mute_toggle_keyboard
+private_settings_misc_keyboard = _legacy.private_settings_misc_keyboard
+private_settings_mafia_ratio_keyboard = _legacy.private_settings_mafia_ratio_keyboard
+private_settings_voting_mode_keyboard = _legacy.private_settings_voting_mode_keyboard
+private_settings_misc_toggle_keyboard = _legacy.private_settings_misc_toggle_keyboard
+private_settings_leave_keyboard = _legacy.private_settings_leave_keyboard
+get_private_action_room = _legacy.get_private_action_room
+get_player_profile_room = _legacy.get_player_profile_room
+get_pending_last_word_room = _legacy.get_pending_last_word_room
+cmd_settings = _legacy.cmd_settings
+on_private_settings_callback = _legacy.on_private_settings_callback
+on_private_menu_callback = _legacy.on_private_menu_callback
+on_private_text = _legacy.on_private_text
