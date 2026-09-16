@@ -23,6 +23,10 @@ class GameDomainCompatibilityTests(unittest.TestCase):
         self.assertEqual(GameRoom.open_registration.__module__, "mafia_bot.game_domain.lobby")
         self.assertEqual(GameRoom.remove_player.__module__, "mafia_bot.game_domain.lobby")
 
+    def test_role_methods_are_from_domain_module(self) -> None:
+        self.assertEqual(GameRoom.assign_roles.__module__, "mafia_bot.game_domain.assignment")
+        self.assertEqual(GameRoom.build_roles.__module__, "mafia_bot.game_domain.assignment")
+
     def test_room_starts_empty_and_can_open_registration(self) -> None:
         room = GameRoom(chat_id=123, host_id=456)
         self.assertEqual(room.players, {})
@@ -48,11 +52,14 @@ class GameDomainCompatibilityTests(unittest.TestCase):
         room.assign_roles()
 
         self.assertTrue(room.started)
+        self.assertEqual(room.phase, "night")
+        self.assertEqual(room.round_no, 1)
         self.assertEqual(len(room.players), 6)
         assigned_roles = {player.role for player in room.players.values()}
         self.assertIn(ROLE_DON, assigned_roles)
         self.assertIn(ROLE_MAFIA, assigned_roles)
         self.assertIn(ROLE_CITIZEN, assigned_roles)
+        self.assertIsNotNone(room.started_at)
 
     def test_domain_storage_manages_rooms(self) -> None:
         storage = GameStorage()
