@@ -26,6 +26,15 @@ from .night_actions import (
     set_night_vote,
 )
 from .night_resolution import resolve_night
+from .night_state import (
+    all_required_night_actions_done,
+    arm_documents,
+    arm_shield,
+    can_skip_night_action,
+    pop_spent_documents_user_ids,
+    pop_spent_shield_user_ids,
+    set_night_skip,
+)
 
 # Route extracted behavior through focused domain modules while keeping the
 # original GameRoom class identity used by storage and handlers.
@@ -47,5 +56,12 @@ GameRoom.set_commissar_action_mode = set_commissar_action_mode
 GameRoom.set_commissar_shot_target = set_commissar_shot_target
 GameRoom.set_advocate_target = set_advocate_target
 GameRoom.resolve_night = resolve_night
+GameRoom.all_required_night_actions_done = all_required_night_actions_done
+GameRoom.can_skip_night_action = can_skip_night_action
+GameRoom.set_night_skip = set_night_skip
+GameRoom.arm_shield = arm_shield
+GameRoom.arm_documents = arm_documents
+GameRoom.pop_spent_documents_user_ids = pop_spent_documents_user_ids
+GameRoom.pop_spent_shield_user_ids = pop_spent_shield_user_ids
 
 __all__ = ["Player", "GameRoom"]
