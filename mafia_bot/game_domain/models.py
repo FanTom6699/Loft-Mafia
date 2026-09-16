@@ -67,6 +67,30 @@ from .player_state import (
     transfer_commissar_if_needed,
     transfer_don_if_needed,
 )
+from .presentation import (
+    add_night_report_line,
+    alive_players_text,
+    alive_role_counts_text,
+    alive_role_hints_text,
+    can_send_last_word,
+    commissar_check_result_text,
+    consume_last_word,
+    day_intro_text,
+    day_media_caption,
+    end_day_without_votes,
+    final_report_text,
+    game_duration_text,
+    lobby_text,
+    night_intro_text,
+    night_media_caption,
+    pop_night_kill_sources,
+    pop_night_reports,
+    public_player_mark,
+    queue_last_words,
+    resolve_day,
+    set_day_vote,
+    status_text,
+)
 
 # Route extracted behavior through focused domain modules while keeping the
 # original GameRoom class identity used by storage and handlers.
@@ -126,5 +150,28 @@ GameRoom.arm_shield = arm_shield
 GameRoom.arm_documents = arm_documents
 GameRoom.pop_spent_documents_user_ids = pop_spent_documents_user_ids
 GameRoom.pop_spent_shield_user_ids = pop_spent_shield_user_ids
+
+GameRoom.public_player_mark = public_player_mark
+GameRoom.commissar_check_result_text = commissar_check_result_text
+GameRoom.pop_night_reports = pop_night_reports
+GameRoom.add_night_report_line = add_night_report_line
+GameRoom.queue_last_words = queue_last_words
+GameRoom.can_send_last_word = can_send_last_word
+GameRoom.consume_last_word = consume_last_word
+GameRoom.set_day_vote = set_day_vote
+GameRoom.resolve_day = resolve_day
+GameRoom.end_day_without_votes = end_day_without_votes
+GameRoom.pop_night_kill_sources = pop_night_kill_sources
+GameRoom.alive_role_counts_text = alive_role_counts_text
+GameRoom.alive_players_text = alive_players_text
+GameRoom.alive_role_hints_text = alive_role_hints_text
+GameRoom.game_duration_text = game_duration_text
+GameRoom.final_report_text = final_report_text
+GameRoom.night_intro_text = night_intro_text
+GameRoom.night_media_caption = night_media_caption
+GameRoom.day_intro_text = day_intro_text
+GameRoom.day_media_caption = day_media_caption
+GameRoom.status_text = status_text
+GameRoom.lobby_text = lobby_text
 
 __all__ = ["Player", "GameRoom"]
