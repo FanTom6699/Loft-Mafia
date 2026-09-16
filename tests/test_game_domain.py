@@ -3,6 +3,7 @@ import unittest
 from mafia_bot import game
 from mafia_bot.game_domain import (
     GameRoom,
+    GameStorage,
     Player,
     ROLE_CITIZEN,
     ROLE_DON,
@@ -15,6 +16,7 @@ class GameDomainCompatibilityTests(unittest.TestCase):
     def test_public_game_api_uses_domain_models(self) -> None:
         self.assertIs(game.Player, Player)
         self.assertIs(game.GameRoom, GameRoom)
+        self.assertIs(game.GameStorage, GameStorage)
 
     def test_room_starts_empty_and_can_open_registration(self) -> None:
         room = GameRoom(chat_id=123, host_id=456)
@@ -46,6 +48,18 @@ class GameDomainCompatibilityTests(unittest.TestCase):
         self.assertIn(ROLE_DON, assigned_roles)
         self.assertIn(ROLE_MAFIA, assigned_roles)
         self.assertIn(ROLE_CITIZEN, assigned_roles)
+
+    def test_domain_storage_manages_rooms(self) -> None:
+        storage = GameStorage()
+        created, message = storage.create_room(123, 456)
+
+        self.assertTrue(created)
+        self.assertEqual(message, "Лобби создано.")
+        self.assertIsInstance(storage.get_room(123), GameRoom)
+        self.assertFalse(storage.create_room(123, 789)[0])
+
+        storage.close_room(123)
+        self.assertIsNone(storage.get_room(123))
 
 
 if __name__ == "__main__":
