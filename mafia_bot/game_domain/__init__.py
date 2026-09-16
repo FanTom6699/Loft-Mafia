@@ -18,6 +18,7 @@ from .night_actions import (
     set_mistress_target,
     set_night_vote,
 )
+from .night_resolution import resolve_night
 from .models import GameRoom, Player
 from .storage import GameStorage
 
