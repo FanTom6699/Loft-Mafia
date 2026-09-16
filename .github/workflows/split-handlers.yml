@@ -1,20 +1,23 @@
 name: Split handlers
 
 on:
-  push:
+  pull_request_target:
+    types: [opened, reopened, synchronize]
     branches:
-      - refactor/handlers-split
+      - main
 
 permissions:
   contents: write
 
 jobs:
   split:
-    if: github.actor != 'github-actions[bot]'
+    if: github.actor != 'github-actions[bot]' && github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: ${{ github.event.pull_request.head.ref }}
+          repository: ${{ github.event.pull_request.head.repo.full_name }}
           fetch-depth: 0
       - run: python tools/split_handlers.py
       - run: |
