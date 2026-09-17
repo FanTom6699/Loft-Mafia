@@ -18,6 +18,30 @@ class GameDomainCompatibilityTests(unittest.TestCase):
         self.assertIs(game.GameRoom, GameRoom)
         self.assertIs(game.GameStorage, GameStorage)
 
+    def test_models_are_owned_by_domain(self) -> None:
+        self.assertEqual(Player.__module__, "mafia_bot.game_domain.models")
+        self.assertEqual(GameRoom.__module__, "mafia_bot.game_domain.models")
+        expected_fields = {
+            "chat_id",
+            "host_id",
+            "settings",
+            "chat_title",
+            "players",
+            "started",
+            "phase",
+            "round_no",
+            "registration_open",
+            "night_votes",
+            "day_votes",
+            "trial_candidate_id",
+            "night_reports",
+            "pending_last_words",
+            "winner_team",
+            "started_at",
+            "finished_at",
+        }
+        self.assertTrue(expected_fields.issubset(GameRoom.__dataclass_fields__))
+
     def test_lobby_methods_are_from_domain_module(self) -> None:
         self.assertEqual(GameRoom.add_player.__module__, "mafia_bot.game_domain.lobby")
         self.assertEqual(GameRoom.open_registration.__module__, "mafia_bot.game_domain.lobby")
@@ -27,18 +51,27 @@ class GameDomainCompatibilityTests(unittest.TestCase):
         self.assertEqual(GameRoom.assign_roles.__module__, "mafia_bot.game_domain.assignment")
         self.assertEqual(GameRoom.build_roles.__module__, "mafia_bot.game_domain.assignment")
 
-    def test_day_flow_methods_are_from_domain_module(self) -> None:
-        self.assertEqual(GameRoom.all_alive_day_voted.__module__, "mafia_bot.game_domain.day_flow")
-        self.assertEqual(GameRoom.all_alive_trial_voted.__module__, "mafia_bot.game_domain.day_flow")
-        self.assertEqual(GameRoom.start_day_discussion.__module__, "mafia_bot.game_domain.day_flow")
-        self.assertEqual(GameRoom.start_day_nomination.__module__, "mafia_bot.game_domain.day_flow")
-        self.assertEqual(GameRoom.start_day_trial.__module__, "mafia_bot.game_domain.day_flow")
-        self.assertEqual(GameRoom.resolve_day_nomination.__module__, "mafia_bot.game_domain.day_flow")
-        self.assertEqual(GameRoom.set_trial_vote.__module__, "mafia_bot.game_domain.day_flow")
-        self.assertEqual(GameRoom.trial_vote_counts.__module__, "mafia_bot.game_domain.day_flow")
-        self.assertEqual(GameRoom.end_day_no_lynch.__module__, "mafia_bot.game_domain.day_flow")
-        self.assertEqual(GameRoom.resolve_day_trial.__module__, "mafia_bot.game_domain.day_flow")
-        self.assertEqual(GameRoom._reset_for_night_transition.__module__, "mafia_bot.game_domain.day_flow")
+    def test_player_state_methods_are_from_domain_module(self) -> None:
+        expected = (
+            "get_player",
+            "alive_players",
+            "alive_mafia",
+            "alive_mafia_ids",
+            "all_mafia_voted",
+            "current_mafia_target_id",
+            "mark_night_role_announced",
+            "transfer_don_if_needed",
+            "transfer_commissar_if_needed",
+            "remember_commissar_check",
+            "set_pending_sergeant_check",
+            "pop_pending_sergeant_check",
+            "forget_dead_commissar_checks",
+            "alive_civilians",
+            "check_winner",
+        )
+        for method_name in expected:
+            with self.subTest(method_name=method_name):
+                self.assertEqual(getattr(GameRoom, method_name).__module__, "mafia_bot.game_domain.player_state")
 
     def test_night_action_methods_are_from_domain_module(self) -> None:
         self.assertEqual(GameRoom.set_night_vote.__module__, "mafia_bot.game_domain.night_actions")
@@ -64,17 +97,61 @@ class GameDomainCompatibilityTests(unittest.TestCase):
         self.assertEqual(GameRoom.pop_spent_documents_user_ids.__module__, "mafia_bot.game_domain.night_state")
         self.assertEqual(GameRoom.pop_spent_shield_user_ids.__module__, "mafia_bot.game_domain.night_state")
 
-    def test_room_starts_empty_and_can_open_registration(self) -> None:
+    def test_day_flow_methods_are_from_domain_module(self) -> None:
+        expected = (
+            "all_alive_day_voted",
+            "all_alive_trial_voted",
+            "start_day_discussion",
+            "start_day_nomination",
+            "set_trial_vote",
+            "trial_vote_counts",
+            "end_day_no_lynch",
+            "resolve_day_trial",
+        )
+        for method_name in expected:
+            with self.subTest(method_name=method_name):
+                self.assertEqual(getattr(GameRoom, method_name).__module__, "mafia_bot.game_domain.day_flow")
+
+    def test_presentation_methods_are_from_domain_module(self) -> None:
+        expected = (
+            "seat_number",
+            "anonymous_player_label",
+            "public_player_mark",
+            "commissar_check_result_text",
+            "pop_night_reports",
+            "add_night_report_line",
+            "queue_last_words",
+            "can_send_last_word",
+            "consume_last_word",
+            "set_day_vote",
+            "resolve_day",
+            "end_day_without_votes",
+            "pop_night_kill_sources",
+            "alive_role_counts_text",
+            "alive_players_text",
+            "alive_role_hints_text",
+            "game_duration_text",
+            "final_report_text",
+            "night_intro_text",
+            "night_media_caption",
+            "day_intro_text",
+            "day_media_caption",
+            "status_text",
+            "lobby_text",
+        )
+        for method_name in expected:
+            with self.subTest(method_name=method_name):
+                self.assertEqual(getattr(GameRoom, method_name).__module__, "mafia_bot.game_domain.presentation")
+
+    def test_seat_and_anonymous_helpers_keep_original_behavior(self) -> None:
         room = GameRoom(chat_id=123, host_id=456)
-        self.assertEqual(room.players, {})
-        self.assertFalse(room.registration_open)
+        room.players[10] = Player(user_id=10, full_name="First")
+        room.players[20] = Player(user_id=20, full_name="Second")
 
-        room.open_registration()
-        added, message = room.add_player(1, "Alice")
-
-        self.assertTrue(added)
-        self.assertEqual(message, "Игрок добавлен.")
-        self.assertIsInstance(room.get_player(1), Player)
+        self.assertEqual(room.seat_number(10), 1)
+        self.assertEqual(room.seat_number(20), 2)
+        self.assertIsNone(room.seat_number(999))
+        self.assertEqual(room.anonymous_player_label(room.players[10]), "Невидимка")
 
     def test_role_plan_keeps_expected_size(self) -> None:
         for player_count, roles in ROLE_PLAN_BY_COUNT.items():
@@ -97,6 +174,53 @@ class GameDomainCompatibilityTests(unittest.TestCase):
         self.assertIn(ROLE_MAFIA, assigned_roles)
         self.assertIn(ROLE_CITIZEN, assigned_roles)
         self.assertIsNotNone(room.started_at)
+
+    def test_day_nomination_flow(self) -> None:
+        room = GameRoom(chat_id=123, host_id=456)
+        room.phase = "day"
+        room.start_day_nomination()
+        for user_id in range(1, 5):
+            room.players[user_id] = Player(user_id=user_id, full_name=f"Player {user_id}")
+
+        room.day_votes = {1: 2, 2: 2, 3: 2, 4: 3}
+        self.assertTrue(room.all_alive_day_voted())
+        ok, candidate_id = room.resolve_day_nomination()
+        self.assertTrue(ok)
+        self.assertEqual(candidate_id, 2)
+
+    def test_day_trial_flow(self) -> None:
+        room = GameRoom(chat_id=123, host_id=456)
+        room.phase = "day"
+        for user_id in range(1, 5):
+            room.players[user_id] = Player(user_id=user_id, full_name=f"Player {user_id}")
+
+        ok, message = room.start_day_trial(1)
+        self.assertTrue(ok)
+        self.assertEqual(room.day_stage, "trial")
+        self.assertEqual(message, "Этап голосования за/против запущен.")
+
+        self.assertEqual(room.set_trial_vote(2, True), (True, "Твой голос принят."))
+        self.assertEqual(room.set_trial_vote(3, True), (True, "Твой голос принят."))
+        self.assertEqual(room.set_trial_vote(4, False), (True, "Твой голос принят."))
+        self.assertTrue(room.all_alive_trial_voted())
+        self.assertEqual(room.trial_vote_counts(), (2, 1))
+
+    def test_day_no_lynch_transitions_to_night(self) -> None:
+        room = GameRoom(chat_id=123, host_id=456)
+        room.phase = "day"
+        room.round_no = 2
+        room.players[1] = Player(user_id=1, full_name="Mafia", role=ROLE_MAFIA)
+        room.players[2] = Player(user_id=2, full_name="Citizen 2", role=ROLE_CITIZEN)
+        room.players[3] = Player(user_id=3, full_name="Citizen 3", role=ROLE_CITIZEN)
+        room.players[4] = Player(user_id=4, full_name="Citizen 4", role=ROLE_CITIZEN)
+        room.start_day_discussion()
+
+        ok, message = room.end_day_no_lynch()
+
+        self.assertTrue(ok)
+        self.assertEqual(message, "Сегодня решили никого не вешать. Наступает ночь.")
+        self.assertEqual(room.phase, "night")
+        self.assertEqual(room.round_no, 3)
 
     def test_domain_storage_manages_rooms(self) -> None:
         storage = GameStorage()
