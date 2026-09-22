@@ -269,6 +269,12 @@ def resolve_night(self) -> tuple[bool, str, list[Player], str | None, int | None
         eliminated.append(target)
         self.night_kill_sources[target.user_id] = sources
 
+        if "камикадзе" in sources and notify_actions:
+            self.add_night_report_line(
+                target.user_id,
+                "💣 Камикадзе психанул и забрал тебя с собой в могилу.",
+            )
+
         if target.role == ROLE_KAMIKAZE:
             revenge_target_ids = night_kamikaze_revenge_targets(target.user_id, sources)
             for revenge_target_id in revenge_target_ids:
