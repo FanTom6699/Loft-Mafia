@@ -1,6 +1,7 @@
 # Extracted from mafia_bot/handlers.py.
 # Refactor only: gameplay behavior is unchanged.
 from ._context import *  # noqa: F401,F403
+from ._context import TOP_PERIOD_LABELS
 
 def format_player_stats_text(stats: dict) -> str:
     games = int(stats.get("games_played", 0))
