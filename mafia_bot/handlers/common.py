@@ -923,7 +923,10 @@ async def on_developer_phrase(message: Message) -> None:
     await message.reply(f"Это {dev_link}", parse_mode="HTML")
 
 
-@router.message(F.chat.type.in_({"group", "supergroup"}))
+@router.message(
+    F.chat.type.in_({"group", "supergroup"}),
+    ~F.text.startswith("/"),
+)
 async def enforce_group_game_rules(message: Message) -> None:
     room = storage.get_room(message.chat.id)
     if room is None or not room.started or room.phase == PHASE_FINISHED:
