@@ -200,3 +200,19 @@ TOP_PERIOD_LABELS = {
     "month": "Месячный",
     "all": "За всё время",
 }
+
+PRIVATE_ROLE_ORDER = [
+    ROLE_DON,
+    ROLE_MAFIA,
+    ROLE_MANIAC,
+    ROLE_COMMISSAR,
+    ROLE_DOCTOR,
+    ROLE_MISTRESS,
+    ROLE_BUM,
+    ROLE_ADVOCATE,
+    ROLE_SERGEANT,
+    ROLE_SUICIDE,
+    ROLE_LUCKY,
+    ROLE_KAMIKAZE,
+    ROLE_CITIZEN,
+]
