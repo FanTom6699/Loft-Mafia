@@ -210,6 +210,9 @@ class GameDomainCompatibilityTests(unittest.TestCase):
         room.phase = "day"
         room.round_no = 2
         room.start_day_discussion()
+        room.players[1] = Player(user_id=1, full_name="Player 1", role=ROLE_MAFIA)
+        for user_id in range(2, 5):
+            room.players[user_id] = Player(user_id=user_id, full_name=f"Player {user_id}", role=ROLE_CITIZEN)
 
         ok, message = room.end_day_no_lynch()
 
