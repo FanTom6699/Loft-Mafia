@@ -165,25 +165,25 @@ async def upsert_registration_warning_message(
     text: str,
     reply_markup: InlineKeyboardMarkup | None = None,
 ) -> None:
-    message_id = registration_warning_message_ids.get(chat_id)
-    if message_id is not None:
+    # Each warning is a separate message. Remove the previous warning first
+    # so only the latest registration countdown is visible.
+    old_message_id = registration_warning_message_ids.pop(chat_id, None)
+    if old_message_id is not None:
         try:
-            await bot.edit_message_text(
-                chat_id=chat_id,
-                message_id=message_id,
-                text=text,
-                reply_markup=reply_markup,
-            )
-            return
+            await bot.delete_message(chat_id=chat_id, message_id=old_message_id)
         except Exception:
-            registration_warning_message_ids.pop(chat_id, None)
+            pass
 
     try:
-        sent = await bot.send_message(chat_id, text, reply_markup=reply_markup)
+        sent = await bot.send_message(
+            chat_id,
+            text,
+            reply_markup=reply_markup,
+            parse_mode="HTML",
+        )
     except Exception:
         return
     registration_warning_message_ids[chat_id] = sent.message_id
-
 
 async def clear_registration_warning_message(bot: Bot, chat_id: int) -> None:
     message_id = registration_warning_message_ids.pop(chat_id, None)
