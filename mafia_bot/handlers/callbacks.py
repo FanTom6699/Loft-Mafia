@@ -270,11 +270,11 @@ async def on_private_text(message: Message) -> None:
         safe_payload = escape(payload)
         await message.answer("Предсмертное сообщение принято.", **private_game_send_kwargs(last_word_room))
         public_prefix = f"Кто-то из жителей слышал, как {room_player_mark(last_word_room, player) if player is not None else player_mark} кричал перед смертью:\n"
-        await message.bot.send_message(
-            last_word_room.chat_id,
+        last_word_room.queue_last_word_for_day(
+            message.from_user.id,
             f"{public_prefix}<b>{safe_payload}</b>",
-            parse_mode="HTML",
         )
+        persist_room(last_word_room)
         return
 
     room = get_private_action_room(message.from_user.id)
