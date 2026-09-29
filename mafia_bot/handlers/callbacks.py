@@ -264,7 +264,6 @@ async def on_private_text(message: Message) -> None:
         persist_room(last_word_room)
 
         player = last_word_room.get_player(message.from_user.id)
-        await message.answer("Предсмертное сообщение принято.", **private_game_send_kwargs(last_word_room))
         if player is not None:
             public_text = last_word_room.last_word_public_text(player, payload)
         else:
@@ -294,6 +293,16 @@ async def on_private_text(message: Message) -> None:
                     public_text,
                 )
                 persist_room(last_word_room)
+                await message.answer(
+                    "Предсмертное сообщение принято. "
+                    "Оно будет отправлено в следующий день, во время обсуждения.",
+                    **private_game_send_kwargs(last_word_room),
+                )
+            else:
+                await message.answer(
+                    "Предсмертное сообщение принято и отправлено в чат.",
+                    **private_game_send_kwargs(last_word_room),
+                )
         else:
             # At night, nomination, or trial the message is held until the
             # next daytime discussion so it never appears during voting.
@@ -302,6 +311,11 @@ async def on_private_text(message: Message) -> None:
                 public_text,
             )
             persist_room(last_word_room)
+            await message.answer(
+                "Предсмертное сообщение принято. "
+                "Оно будет отправлено в следующий день, во время обсуждения.",
+                **private_game_send_kwargs(last_word_room),
+            )
         return
 
     room = get_private_action_room(message.from_user.id)
