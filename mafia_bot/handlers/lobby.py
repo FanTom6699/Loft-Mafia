@@ -332,27 +332,20 @@ async def bot_start_link(bot: Bot) -> str:
 
 
 def registration_text(room) -> str:
-    lines = ["<b>Ведётся набор в игру</b>", ""]
+    lines = ["<b>Ведётся набор в игру</b>"]
     if not room.players:
-        lines.append("Зарегистрировались::")
-        lines.append("Пока никто не зарегистрировался.")
-        lines.append("")
-        lines.append("Итого <b>0</b> чел.")
         return "\n".join(lines)
 
-    joined_names = ", ".join(player_profile_link(player) for player in room.players.values())
-    lines.append("Зарегистрировались::")
-    lines.append(joined_names)
+    lines.append("")
+    lines.append("Зарегистрировались:")
+    lines.append(", ".join(player_profile_link(player) for player in room.players.values()))
     lines.append("")
     lines.append(f"Итого <b>{len(room.players)}</b> чел.")
     return "\n".join(lines)
 
 
 def registration_post_text(room) -> str:
-    remaining = registration_remaining_seconds(room)
-    if remaining <= 0:
-        remaining = int(room_chat_settings(room)["timings"]["registration"])
-    return registration_text(room) + f"\n\nДо окончания регистрации осталось <b>{remaining}</b> сек."
+    return registration_text(room)
 
 
 async def private_bot_link(bot: Bot) -> str:
