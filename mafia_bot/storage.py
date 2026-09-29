@@ -189,6 +189,7 @@ class GameStateRepository:
             "pending_last_words": sorted(room.pending_last_words),
             "used_last_words": sorted(room.used_last_words),
             "last_words_log": room.last_words_log,
+            "last_word_death_nights": room.last_word_death_nights,
             "pending_last_words_public": room.pending_last_words_public,
             "phase_started_at": GameStateRepository._dt_to_str(room.phase_started_at),
             "phase_duration_seconds": room.phase_duration_seconds,
@@ -297,6 +298,9 @@ class GameStateRepository:
         room.pending_last_words = {int(v) for v in payload.get("pending_last_words", [])}
         room.used_last_words = {int(v) for v in payload.get("used_last_words", [])}
         room.last_words_log = {int(k): str(v) for k, v in payload.get("last_words_log", {}).items()}
+        room.last_word_death_nights = {
+            int(k): int(v) for k, v in payload.get("last_word_death_nights", {}).items()
+        }
         room.pending_last_words_public = {
             int(k): str(v) for k, v in payload.get("pending_last_words_public", {}).items()
         }
