@@ -11,6 +11,7 @@ from .constants import (
     ROLE_DON,
     ROLE_MAFIA,
     ROLE_MANIAC,
+    ROLE_ADVOCATE,
     ROLE_SERGEANT,
     MAFIA_ROLES,
 )
