@@ -68,55 +68,60 @@ def night_role_announcement_text(room, role_name: str, target=None, *, variant: 
         target_mark = room_player_mark(room, target)
         targeted_announcements = {
             ROLE_COMMISSAR: {
-                "default": f"<b>🕵️ Комиссар Каттани </b>проверяет {target_mark}.",
-                "shoot": f"<b>🕵️ Комиссар Каттани </b>стреляет в {target_mark}.",
+                "default": f"<b>🕵️ Комиссар Каттани</b> проверяет {target_mark}.",
+                "shoot": f"<b>🕵️ Комиссар Каттани</b> стреляет в {target_mark}.",
             },
             ROLE_BUM: {
-                "default": f"<b>🧙🏼‍♂️ Бомж </b>пошёл за бутылкой к {target_mark}.",
+                "default": f"<b>🧙🏼‍♂️ Бомж</b> пошёл за бутылкой к {target_mark}.",
             },
             ROLE_MANIAC: {
-                "default": f"<b>🔪 Маньяк </b>выбрал целью {target_mark}.",
+                "default": f"<b>🔪 Маньяк</b> выбрал целью {target_mark}.",
             },
             ROLE_ADVOCATE: {
-                "default": f"<b>👨🏼‍💼 Адвокат </b>решил защищать {target_mark}.",
+                "default": f"<b>👨🏼‍💼 Адвокат</b> решил защищать {target_mark}.",
             },
             ROLE_MISTRESS: {
-                "default": f"<b>💃🏼 Любовница </b>решила зайти к {target_mark}.",
+                "default": f"<b>💃🏼 Любовница</b> решила зайти к {target_mark}.",
             },
             ROLE_DOCTOR: {
-                "default": f"<b>👨🏼‍⚕️ Доктор </b>решил зайти к {target_mark}.",
+                "default": f"<b>👨🏼‍⚕️ Доктор</b> решил зайти к {target_mark}.",
             },
             ROLE_KAMIKAZE: {
-                "default": f"<b>💣 Камикадзе </b>решил забрать с собой {target_mark}.",
+                "default": f"<b>💣 Камикадзе</b> решил забрать с собой {target_mark}.",
             },
             ROLE_DON: {
-                "default": f"<b>🤵🏻 Мафия </b>выбрала жертву {target_mark}.",
+                "default": f"<b>🤵🏻 Мафия</b> выбрала жертву {target_mark}.",
             },
             ROLE_MAFIA: {
-                "default": f"<b>🤵🏻 Мафия </b>выбрала жертву {target_mark}.",
+                "default": f"<b>🤵🏻 Мафия</b> выбрала жертву {target_mark}.",
             },
         }
         role_variants = targeted_announcements.get(role_name)
         if role_variants is not None:
-            return role_variants.get(variant, role_variants.get("default", f"{role_mark_text(role_name)} выбрал цель {target_mark}."))
+            return role_variants.get(
+                variant,
+                role_variants.get(
+                    "default",
+                    f"{role_mark_text(role_name)} выбрал цель {target_mark}.",
+                ),
+            )
 
     role_announcement = {
-        ROLE_COMMISSAR: "<b>🕵️ Комиссар Каттани ушёл искать злодеев...",
-        ROLE_BUM: "<b>🧙🏼‍♂️ Бомж пошёл к кому-то за бутылкой...",
-        ROLE_MANIAC: "<b>🔪 Маньяк </b>спрятался глубоко в кустах...",
-        ROLE_ADVOCATE: "<b>👨🏼‍💼 Адвокат </b>ищет мафию для защиты...",
-        ROLE_MISTRESS: "<b>💃🏼 Любовница </b>уже ждёт кого-то в гости...",
-        ROLE_DOCTOR: "<b>👨🏼‍⚕️ Доктор </b>вышел на ночное дежурство...",
-        ROLE_KAMIKAZE: "<b>💣 Камикадзе </b>решил забрать кого-то с собой...",
-        ROLE_DON: "<b>🤵🏻 Мафия </b>выбрала жертву...",
-        ROLE_MAFIA: "<b>🤵🏻 Мафия </b>выбрала жертву...",
+        ROLE_COMMISSAR: "<b>🕵️ Комиссар Каттани</b> ушёл искать злодеев...",
+        ROLE_BUM: "<b>🧙🏼‍♂️ Бомж</b> пошёл к кому-то за бутылкой...",
+        ROLE_MANIAC: "<b>🔪 Маньяк</b> спрятался глубоко в кустах...",
+        ROLE_ADVOCATE: "<b>👨🏼‍💼 Адвокат</b> ищет мафию для защиты...",
+        ROLE_MISTRESS: "<b>💃🏼 Любовница</b> уже ждёт кого-то в гости...",
+        ROLE_DOCTOR: "<b>👨🏼‍⚕️ Доктор</b> вышел на ночное дежурство...",
+        ROLE_KAMIKAZE: "<b>💣 Камикадзе</b> решил забрать кого-то с собой...",
+        ROLE_DON: "<b>🤵🏻 Мафия</b> выбрала жертву...",
+        ROLE_MAFIA: "<b>🤵🏻 Мафия</b> выбрала жертву...",
     }
     announcement_text = role_announcement.get(role_name)
     if announcement_text is None:
         role_mark = role_mark_text(role_name)
         return f"{role_mark} сделал ночной ход."
     return announcement_text
-
 
 def track_action_menu_message(chat_id: int, user_id: int, message_id: int) -> None:
     by_chat = action_menu_messages.setdefault(chat_id, {})
