@@ -280,7 +280,8 @@ def final_report_text(self) -> str:
             and player.role != ROLE_MANIAC
             and player.role != ROLE_ADVOCATE
         )
-        if is_winner and player.alive:
+        personal_suicide_win = player.user_id in self.suicide_winners
+        if (is_winner and player.alive) or personal_suicide_win:
             winners.append(player)
         else:
             others.append(player)
@@ -292,12 +293,6 @@ def final_report_text(self) -> str:
     lines.extend(["", "Остальные участники:"])
     for p in others:
         lines.append(f"  {player_link(p)} - {ROLE_EMOJI.get(p.role, '')} <b>{p.role}</b>".rstrip())
-
-    if self.suicide_winners:
-        lines.extend(["", "Личная победа самоубийцы:"])
-        for player in self.players.values():
-            if player.user_id in self.suicide_winners:
-                lines.append(f"  {player_link(player)}")
 
     lines.extend(["", f"Игра длилась: {self.game_duration_text()}"])
     return "\n".join(lines)
