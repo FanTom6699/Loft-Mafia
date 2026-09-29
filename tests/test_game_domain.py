@@ -258,6 +258,8 @@ class GameDomainCompatibilityTests(unittest.TestCase):
 
         room.night_votes = {3: 1}
         room.maniac_target_id = 1
+        room.commissar_action_mode = "check"
+        room.commissar_target_id = 5
 
         ok, _, eliminated, _, _, transfer_note, successor_id = room.resolve_night()
 
@@ -268,6 +270,10 @@ class GameDomainCompatibilityTests(unittest.TestCase):
         self.assertEqual(room.players[2].role, ROLE_COMMISSAR)
         self.assertEqual(transfer_note, "👮🏼‍♂️ Сержант унаследовал роль 🕵️‍ Комиссар Каттани")
         self.assertEqual(successor_id, 2)
+        self.assertEqual(
+            room.pending_sergeant_check,
+            {"target_user_id": 5, "result_role": ROLE_CITIZEN},
+        )
 
     def test_commissar_succeeds_sergeant_after_afk_death(self) -> None:
         room = GameRoom(chat_id=123, host_id=456)
