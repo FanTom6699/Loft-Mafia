@@ -80,13 +80,13 @@ def last_word_public_text(self, player, text: str) -> str:
     safe_text = escape(text)
     if death_night is not None:
         return (
-            f"Кто-то из жителей слышал, как {name_link} кричал перед смертью "
-            f"в <b>{death_night}</b> ночь:\n"
-            f"<b>{safe_text}</b>"
+            f"<i>Кто-то из жителей слышал, как {name_link} кричал перед смертью "
+            f"в <b>{death_night}</b> ночь:</i>\n"
+            f"{safe_text}"
         )
     return (
-        f"Кто-то из жителей слышал, как {name_link} кричал перед смертью:\n"
-        f"<b>{safe_text}</b>"
+        f"<i>Кто-то из жителей слышал, как {name_link} кричал перед смертью:</i>\n"
+        f"{safe_text}"
     )
 
 
