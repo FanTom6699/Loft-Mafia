@@ -653,12 +653,13 @@ async def cmd_leave(message: Message) -> None:
 
         don_transfer_note = None
         don_successor_id = None
+
+        player.alive = False
         if room.phase == PHASE_DAY and player.role == ROLE_DON:
             don_transfer_result = room.transfer_don_if_needed("выхода Дона из игры")
             if don_transfer_result is not None:
                 don_transfer_note, don_successor_id = don_transfer_result
 
-        player.alive = False
         room.check_winner()
         persist_room(room)
 
