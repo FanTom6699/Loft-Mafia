@@ -157,7 +157,13 @@ def check_winner(self) -> str | None:
     alive = self.alive_players()
     mafia_count = len([p for p in alive if p.role in MAFIA_ROLES])
     maniac_count = len([p for p in alive if p.role == ROLE_MANIAC])
-    civ_count = len([p for p in alive if p.role not in MAFIA_ROLES and p.role != ROLE_MANIAC])
+    civ_count = len([
+        p
+        for p in alive
+        if p.role not in MAFIA_ROLES
+        and p.role != ROLE_MANIAC
+        and p.role != ROLE_ADVOCATE
+    ])
 
     if maniac_count == 1 and len(alive) == 1:
         self.phase = PHASE_FINISHED
