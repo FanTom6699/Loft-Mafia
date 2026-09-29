@@ -843,14 +843,6 @@ async def announce_don_transfer(room, bot: Bot, don_successor_id: int | None) ->
         "Мафия унаследовала роль <b>🤵🏻 Дон</b>",
         parse_mode="HTML",
     )
-    try:
-        await bot.send_message(
-            don_successor_id,
-            "Теперь ты 🤵🏻 Дон",
-            **private_game_send_kwargs(room),
-        )
-    except Exception:
-        pass
     await send_mafia_private_update(
         room,
         bot,
