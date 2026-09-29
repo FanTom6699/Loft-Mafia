@@ -269,7 +269,7 @@ async def on_private_text(message: Message) -> None:
             public_text = last_word_room.last_word_public_text(player, payload)
         else:
             safe_name = escape(normalize_link_display_name("", f"Игрок {message.from_user.id}"))
-            player_mark = f"<a href="tg://user?id={message.from_user.id}">{safe_name}</a>"
+            player_mark = f"<a href=\"tg://user?id={message.from_user.id}\">{safe_name}</a>"
             safe_payload = escape(payload)
             public_text = (
                 f"Кто-то из жителей слышал, как {player_mark} кричал перед смертью:\n"
