@@ -126,6 +126,7 @@ class GameDomainCompatibilityTests(unittest.TestCase):
             "queue_last_words",
             "queue_last_word_for_day",
             "pop_last_words_for_day",
+            "last_word_public_text",
             "can_send_last_word",
             "consume_last_word",
             "set_day_vote",
@@ -193,6 +194,20 @@ class GameDomainCompatibilityTests(unittest.TestCase):
             },
         )
         self.assertEqual(room.pop_last_words_for_day(), {})
+
+    def test_last_word_keeps_the_night_when_submitted_late(self) -> None:
+        room = GameRoom(chat_id=123, host_id=456)
+        room.round_no = 2
+        player = Player(user_id=10, full_name="Player 10")
+
+        room.queue_last_words([player])
+        self.assertEqual(room.last_word_death_nights, {10: 2})
+
+        room.round_no = 3
+        public_text = room.last_word_public_text(player, "Я был в шоке")
+
+        self.assertIn("в ночь №2:", public_text)
+        self.assertIn("<b>Я был в шоке</b>", public_text)
 
     def test_day_nomination_flow(self) -> None:
         room = GameRoom(chat_id=123, host_id=456)
