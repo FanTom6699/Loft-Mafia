@@ -69,17 +69,24 @@ async def process_night_end(bot: Bot, chat_id: int, timer_reason: str | None = N
 
         pending_sergeant_check = room.pop_pending_sergeant_check()
         if pending_sergeant_check is not None:
-            sergeant = next(
-                (player for player in room.alive_players() if player.role == ROLE_SERGEANT),
-                None,
-            )
-            if sergeant is not None:
+            # If the Commissioner died this night, the Sergeant has already
+            # inherited the role. In that case the successor receives the
+            # check result; otherwise the alive Sergeant receives it.
+            check_recipient_id = commissar_successor_id
+            if check_recipient_id is None:
+                sergeant = next(
+                    (player for player in room.alive_players() if player.role == ROLE_SERGEANT),
+                    None,
+                )
+                check_recipient_id = sergeant.user_id if sergeant is not None else None
+
+            if check_recipient_id is not None:
                 target_user_id = int(pending_sergeant_check["target_user_id"])
                 result_role = str(pending_sergeant_check["result_role"])
                 try:
                     await safe_send_message(
                         bot,
-                        sergeant.user_id,
+                        check_recipient_id,
                         sergeant_commissar_check_text(room, target_user_id, result_role),
                         **private_game_send_kwargs(room),
                     )
