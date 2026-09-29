@@ -651,6 +651,13 @@ async def cmd_leave(message: Message) -> None:
             await message.answer("Ты уже выбыл из игры.")
             return
 
+        don_transfer_note = None
+        don_successor_id = None
+        if room.phase == PHASE_DAY and player.role == ROLE_DON:
+            don_transfer_result = room.transfer_don_if_needed("выхода Дона из игры")
+            if don_transfer_result is not None:
+                don_transfer_note, don_successor_id = don_transfer_result
+
         player.alive = False
         room.check_winner()
         persist_room(room)
@@ -659,6 +666,9 @@ async def cmd_leave(message: Message) -> None:
         if show_roles_enabled(room):
             leave_text += f"\nОн был {role_mark_text(player.role)}"
         await message.answer(leave_text, parse_mode="HTML")
+
+        if don_transfer_note:
+            await announce_don_transfer(room, message.bot, don_successor_id)
 
         try:
             await message.bot.send_message(player.user_id, "Ты вышел из игры", **private_game_send_kwargs(room))
