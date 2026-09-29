@@ -6,9 +6,12 @@ from mafia_bot.game_domain import (
     GameStorage,
     Player,
     ROLE_CITIZEN,
+    ROLE_COMMISSAR,
     ROLE_DON,
     ROLE_MAFIA,
+    ROLE_MANIAC,
     ROLE_PLAN_BY_COUNT,
+    ROLE_SERGEANT,
 )
 
 
@@ -220,6 +223,71 @@ class GameDomainCompatibilityTests(unittest.TestCase):
         self.assertEqual(message, "Сегодня решили никого не вешать. Наступает ночь.")
         self.assertEqual(room.phase, "night")
         self.assertEqual(room.round_no, 3)
+
+    def test_commissar_succeeds_sergeant_after_day_lynch(self) -> None:
+        room = GameRoom(chat_id=123, host_id=456)
+        room.phase = "day"
+        room.players[1] = Player(user_id=1, full_name="Commissar", role=ROLE_COMMISSAR)
+        room.players[2] = Player(user_id=2, full_name="Sergeant", role=ROLE_SERGEANT)
+        room.players[3] = Player(user_id=3, full_name="Citizen", role=ROLE_CITIZEN)
+        room.players[4] = Player(user_id=4, full_name="Mafia", role=ROLE_MAFIA)
+
+        ok, message = room.start_day_trial(1)
+        self.assertTrue(ok)
+        room.trial_votes = {2: True, 3: True, 4: False}
+
+        ok, _, eliminated, transfer_note, successor_id, _, _ = room.resolve_day_trial()
+
+        self.assertTrue(ok)
+        self.assertEqual(len(eliminated), 1)
+        self.assertIs(eliminated[0], room.players[1])
+        self.assertFalse(room.players[1].alive)
+        self.assertEqual(room.players[2].role, ROLE_COMMISSAR)
+        self.assertEqual(transfer_note, "👮🏼‍♂️ Сержант унаследовал роль 🕵️‍ Комиссар Каттани")
+        self.assertEqual(successor_id, 2)
+        self.assertEqual(room.phase, "night")
+
+    def test_commissar_succeeds_sergeant_after_multi_source_night_kill(self) -> None:
+        room = GameRoom(chat_id=123, host_id=456)
+        room.phase = "night"
+        room.players[1] = Player(user_id=1, full_name="Commissar", role=ROLE_COMMISSAR)
+        room.players[2] = Player(user_id=2, full_name="Sergeant", role=ROLE_SERGEANT)
+        room.players[3] = Player(user_id=3, full_name="Mafia", role=ROLE_MAFIA)
+        room.players[4] = Player(user_id=4, full_name="Maniac", role=ROLE_MANIAC)
+        room.players[5] = Player(user_id=5, full_name="Citizen", role=ROLE_CITIZEN)
+
+        room.night_votes = {3: 1}
+        room.maniac_target_id = 1
+
+        ok, _, eliminated, _, _, transfer_note, successor_id = room.resolve_night()
+
+        self.assertTrue(ok)
+        self.assertEqual([player.user_id for player in eliminated], [1])
+        self.assertFalse(room.players[1].alive)
+        self.assertEqual(room.night_kill_sources[1], ["мафия", "маньяк"])
+        self.assertEqual(room.players[2].role, ROLE_COMMISSAR)
+        self.assertEqual(transfer_note, "👮🏼‍♂️ Сержант унаследовал роль 🕵️‍ Комиссар Каттани")
+        self.assertEqual(successor_id, 2)
+
+    def test_commissar_succeeds_sergeant_after_afk_death(self) -> None:
+        room = GameRoom(chat_id=123, host_id=456)
+        room.phase = "night"
+        room.players[1] = Player(user_id=1, full_name="Commissar", role=ROLE_COMMISSAR)
+        room.players[2] = Player(user_id=2, full_name="Sergeant", role=ROLE_SERGEANT)
+        room.players[3] = Player(user_id=3, full_name="Mafia", role=ROLE_MAFIA)
+        room.players[4] = Player(user_id=4, full_name="Citizen", role=ROLE_CITIZEN)
+
+        room.night_votes = {3: 4}
+        room.night_missed_streaks = {1: 1}
+
+        ok, _, eliminated, _, _, transfer_note, successor_id = room.resolve_night()
+
+        self.assertTrue(ok)
+        self.assertIn(room.players[1], eliminated)
+        self.assertFalse(room.players[1].alive)
+        self.assertEqual(room.players[2].role, ROLE_COMMISSAR)
+        self.assertEqual(transfer_note, "👮🏼‍♂️ Сержант унаследовал роль 🕵️‍ Комиссар Каттани")
+        self.assertEqual(successor_id, 2)
 
     def test_domain_storage_manages_rooms(self) -> None:
         storage = GameStorage()
