@@ -276,11 +276,20 @@ async def on_private_text(message: Message) -> None:
             last_word_room.phase == PHASE_DAY
             and last_word_room.day_stage == DAY_STAGE_DISCUSSION
         ):
-            await message.bot.send_message(
-                last_word_room.chat_id,
-                public_text,
-                parse_mode="HTML",
-            )
+            try:
+                await message.bot.send_message(
+                    last_word_room.chat_id,
+                    public_text,
+                    parse_mode="HTML",
+                )
+            except Exception:
+                # If immediate publication fails, keep the message for the
+                # next daytime discussion instead of losing it.
+                last_word_room.queue_last_word_for_day(
+                    message.from_user.id,
+                    public_text,
+                )
+                persist_room(last_word_room)
         else:
             # At night, nomination, or trial the message is held until the
             # next daytime discussion so it never appears during voting.
