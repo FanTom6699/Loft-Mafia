@@ -21,9 +21,14 @@ async def start_registration_timer(room, bot: Bot, seconds: int) -> None:
 
     async def worker() -> None:
         try:
-            warning_mark = 30
-            if seconds > warning_mark:
-                await asyncio.sleep(seconds - warning_mark)
+            warning_marks = (59, 30)
+            previous_mark = seconds
+
+            for warning_mark in warning_marks:
+                if previous_mark <= warning_mark:
+                    continue
+
+                await asyncio.sleep(previous_mark - warning_mark)
                 current_room = storage.get_room(room.chat_id)
                 if current_room is not None and not current_room.started and current_room.registration_open:
                     me = await bot.get_me()
@@ -34,9 +39,13 @@ async def start_registration_timer(room, bot: Bot, seconds: int) -> None:
                         f"До окончания регистрации осталось <b>{warning_mark}</b> сек.",
                         reply_markup=registration_lobby_keyboard(join_link),
                     )
-                await asyncio.sleep(warning_mark)
-            else:
-                await asyncio.sleep(seconds)
+
+                previous_mark = warning_mark
+
+            remaining_to_wait = max(0, previous_mark)
+            if remaining_to_wait:
+                await asyncio.sleep(remaining_to_wait)
+
             print(f"[DEBUG] registration_timer_fired: chat_id={room.chat_id}")
             await process_registration_timeout(bot, room.chat_id)
         except asyncio.CancelledError:
@@ -44,7 +53,6 @@ async def start_registration_timer(room, bot: Bot, seconds: int) -> None:
             return
         except Exception as e:
             print(f"[ERROR] registration_timer_worker: chat_id={room.chat_id}, error={e!r}")
-
     registration_timers[room.chat_id] = asyncio.create_task(worker())
 
 
