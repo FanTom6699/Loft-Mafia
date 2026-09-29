@@ -327,9 +327,9 @@ class GameStateRepository:
         win_money = 10
         with sqlite3.connect(self.db_path) as conn:
             for player in room.players.values():
-                won = self._did_player_win(player.role, room.winner_team, player.alive)
-                survived = 1 if player.alive else 0
                 suicide_personal_win = 1 if player.user_id in room.suicide_winners else 0
+                won = self._did_player_win(player.role, room.winner_team, player.alive) or bool(suicide_personal_win)
+                survived = 1 if player.alive else 0
                 mafia_game = 1 if player.role in MAFIA_ROLES or player.role == ROLE_ADVOCATE else 0
                 maniac_game = 1 if player.role == ROLE_MANIAC else 0
                 civilian_game = (
