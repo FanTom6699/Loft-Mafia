@@ -31,7 +31,7 @@ async def start_registration_timer(room, bot: Bot, seconds: int) -> None:
                     await upsert_registration_warning_message(
                         bot,
                         room.chat_id,
-                        f"До окончания регистрации осталось {warning_mark} сек.",
+                        f"До окончания регистрации осталось <b>{warning_mark}</b> сек.",
                         reply_markup=registration_lobby_keyboard(join_link),
                     )
                 await asyncio.sleep(warning_mark)
