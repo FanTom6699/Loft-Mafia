@@ -182,6 +182,12 @@ async def process_night_end(bot: Bot, chat_id: int, timer_reason: str | None = N
         )
         await bot.send_message(chat_id, day_summary, parse_mode="HTML")
 
+        delayed_last_words = room.pop_last_words_for_day()
+        for public_text in delayed_last_words.values():
+            await bot.send_message(chat_id, public_text, parse_mode="HTML")
+        if delayed_last_words:
+            persist_room(room)
+
         if room.phase == PHASE_FINISHED:
             room.pending_last_words.clear()
             stats_already_recorded = room.stats_recorded
