@@ -270,11 +270,25 @@ async def on_private_text(message: Message) -> None:
         safe_payload = escape(payload)
         await message.answer("Предсмертное сообщение принято.", **private_game_send_kwargs(last_word_room))
         public_prefix = f"Кто-то из жителей слышал, как {room_player_mark(last_word_room, player) if player is not None else player_mark} кричал перед смертью:\n"
-        last_word_room.queue_last_word_for_day(
-            message.from_user.id,
-            f"{public_prefix}<b>{safe_payload}</b>",
-        )
-        persist_room(last_word_room)
+        public_text = f"{public_prefix}<b>{safe_payload}</b>"
+
+        if (
+            last_word_room.phase == PHASE_DAY
+            and last_word_room.day_stage == DAY_STAGE_DISCUSSION
+        ):
+            await message.bot.send_message(
+                last_word_room.chat_id,
+                public_text,
+                parse_mode="HTML",
+            )
+        else:
+            # At night, nomination, or trial the message is held until the
+            # next daytime discussion so it never appears during voting.
+            last_word_room.queue_last_word_for_day(
+                message.from_user.id,
+                public_text,
+            )
+            persist_room(last_word_room)
         return
 
     room = get_private_action_room(message.from_user.id)
