@@ -90,6 +90,15 @@ def consume_last_word(self, user_id: int, text: str) -> tuple[bool, str]:
     self.last_words_log[user_id] = cleaned
     return True, cleaned
 
+def queue_last_word_for_day(self, user_id: int, text: str) -> None:
+    self.pending_last_words_public[user_id] = text
+
+
+def pop_last_words_for_day(self) -> dict[int, str]:
+    payload = self.pending_last_words_public.copy()
+    self.pending_last_words_public.clear()
+    return payload
+
 
 def set_day_vote(self, voter_user_id: int, target_user_id: int) -> tuple[bool, str]:
     if self.phase != PHASE_DAY:
