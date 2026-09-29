@@ -236,7 +236,7 @@ class GameDomainCompatibilityTests(unittest.TestCase):
         self.assertTrue(ok)
         room.trial_votes = {2: True, 3: True, 4: False}
 
-        ok, _, eliminated, transfer_note, successor_id, _, _ = room.resolve_day_trial()
+        ok, _, eliminated, _, _, transfer_note, successor_id = room.resolve_day_trial()
 
         self.assertTrue(ok)
         self.assertEqual(len(eliminated), 1)
