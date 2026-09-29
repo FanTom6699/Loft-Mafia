@@ -406,7 +406,11 @@ class GameSimulator:
                     else "🕵️‍♂️ Произошло наследование Комиссара"
                 )
 
-            last_words += self._record_last_words_after_night(eliminated)
+            if self.room.phase != PHASE_FINISHED:
+                afk_ids = set(self.room.afk_killed_user_ids)
+                last_words += self._record_last_words_after_night(
+                    [player for player in eliminated if player.user_id not in afk_ids]
+                )
             if self.room.phase == PHASE_FINISHED:
                 break
 
