@@ -653,12 +653,18 @@ async def cmd_leave(message: Message) -> None:
 
         don_transfer_note = None
         don_successor_id = None
+        commissar_transfer_note = None
+        commissar_successor_id = None
 
         player.alive = False
         if room.phase == PHASE_DAY and player.role == ROLE_DON:
             don_transfer_result = room.transfer_don_if_needed("выхода Дона из игры")
             if don_transfer_result is not None:
                 don_transfer_note, don_successor_id = don_transfer_result
+        if room.phase == PHASE_DAY and player.role == ROLE_COMMISSAR:
+            commissar_transfer_result = room.transfer_commissar_if_needed()
+            if commissar_transfer_result is not None:
+                commissar_transfer_note, commissar_successor_id = commissar_transfer_result
 
         room.check_winner()
         persist_room(room)
@@ -670,6 +676,8 @@ async def cmd_leave(message: Message) -> None:
 
         if don_transfer_note:
             await announce_don_transfer(room, message.bot, don_successor_id)
+        if commissar_transfer_note:
+            await announce_commissar_transfer(room, message.bot, commissar_successor_id)
 
         try:
             await message.bot.send_message(player.user_id, "Ты вышел из игры", **private_game_send_kwargs(room))
