@@ -207,7 +207,7 @@ class GameDomainCompatibilityTests(unittest.TestCase):
         public_text = room.last_word_public_text(player, "Я был в шоке")
 
         self.assertIn("в <b>2</b> ночь:", public_text)
-        self.assertIn("<b>Я был в шоке</b>", public_text)
+        self.assertIn("<i>Я был в шоке</i>", public_text)
 
     def test_day_nomination_flow(self) -> None:
         room = GameRoom(chat_id=123, host_id=456)
