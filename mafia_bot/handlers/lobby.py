@@ -696,14 +696,6 @@ async def cmd_extend(message: Message) -> None:
     new_seconds = remaining + REGISTRATION_EXTENSION_SECONDS
     await start_registration_timer(room, message.bot, new_seconds)
     persist_room(room)
-    join_link = await registration_join_link(message, message.chat.id)
-    await upsert_registration_warning_message(
-        message.bot,
-        message.chat.id,
-        f"Регистрация продлена на {REGISTRATION_EXTENSION_SECONDS} сек. "
-        f"Осталось {new_seconds} сек. Продлений: {room.registration_extensions}.",
-        reply_markup=registration_lobby_keyboard(join_link),
-    )
     await refresh_registration_post(message, room)
 
 
