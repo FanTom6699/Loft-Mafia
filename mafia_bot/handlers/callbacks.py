@@ -264,13 +264,17 @@ async def on_private_text(message: Message) -> None:
         persist_room(last_word_room)
 
         player = last_word_room.get_player(message.from_user.id)
-        raw_name = player.full_name if player is not None else f"Игрок {message.from_user.id}"
-        safe_name = escape(normalize_link_display_name(raw_name or "", f"Игрок {message.from_user.id}"))
-        player_mark = f"<a href=\"tg://user?id={message.from_user.id}\">{safe_name}</a>"
-        safe_payload = escape(payload)
         await message.answer("Предсмертное сообщение принято.", **private_game_send_kwargs(last_word_room))
-        public_prefix = f"Кто-то из жителей слышал, как {room_player_mark(last_word_room, player) if player is not None else player_mark} кричал перед смертью:\n"
-        public_text = f"{public_prefix}<b>{safe_payload}</b>"
+        if player is not None:
+            public_text = last_word_room.last_word_public_text(player, payload)
+        else:
+            safe_name = escape(normalize_link_display_name("", f"Игрок {message.from_user.id}"))
+            player_mark = f"<a href="tg://user?id={message.from_user.id}">{safe_name}</a>"
+            safe_payload = escape(payload)
+            public_text = (
+                f"Кто-то из жителей слышал, как {player_mark} кричал перед смертью:\n"
+                f"<b>{safe_payload}</b>"
+            )
 
         if (
             last_word_room.phase == PHASE_DAY
