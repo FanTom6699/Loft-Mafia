@@ -93,7 +93,9 @@ from .presentation import (
     pop_night_kill_sources,
     pop_night_reports,
     public_player_mark,
+    queue_last_word_for_day,
     queue_last_words,
+    pop_last_words_for_day,
     resolve_day,
     seat_number,
     set_day_vote,
@@ -165,6 +167,7 @@ class GameRoom:
     pending_last_words: set[int] = field(default_factory=set)
     used_last_words: set[int] = field(default_factory=set)
     last_words_log: dict[int, str] = field(default_factory=dict)
+    pending_last_words_public: dict[int, str] = field(default_factory=dict)
     last_doctor_saved_target_id: int | None = None
     phase_started_at: datetime | None = None
     phase_duration_seconds: int | None = None
@@ -241,6 +244,8 @@ GameRoom.commissar_check_result_text = commissar_check_result_text
 GameRoom.pop_night_reports = pop_night_reports
 GameRoom.add_night_report_line = add_night_report_line
 GameRoom.queue_last_words = queue_last_words
+GameRoom.queue_last_word_for_day = queue_last_word_for_day
+GameRoom.pop_last_words_for_day = pop_last_words_for_day
 GameRoom.can_send_last_word = can_send_last_word
 GameRoom.consume_last_word = consume_last_word
 GameRoom.set_day_vote = set_day_vote
