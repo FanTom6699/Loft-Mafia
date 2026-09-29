@@ -189,6 +189,7 @@ class GameStateRepository:
             "pending_last_words": sorted(room.pending_last_words),
             "used_last_words": sorted(room.used_last_words),
             "last_words_log": room.last_words_log,
+            "pending_last_words_public": room.pending_last_words_public,
             "phase_started_at": GameStateRepository._dt_to_str(room.phase_started_at),
             "phase_duration_seconds": room.phase_duration_seconds,
             "stats_recorded": room.stats_recorded,
@@ -296,6 +297,9 @@ class GameStateRepository:
         room.pending_last_words = {int(v) for v in payload.get("pending_last_words", [])}
         room.used_last_words = {int(v) for v in payload.get("used_last_words", [])}
         room.last_words_log = {int(k): str(v) for k, v in payload.get("last_words_log", {}).items()}
+        room.pending_last_words_public = {
+            int(k): str(v) for k, v in payload.get("pending_last_words_public", {}).items()
+        }
         room.phase_started_at = GameStateRepository._str_to_dt(payload.get("phase_started_at"))
         phase_duration = payload.get("phase_duration_seconds")
         room.phase_duration_seconds = int(phase_duration) if phase_duration is not None else None
