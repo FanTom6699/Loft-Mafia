@@ -124,6 +124,8 @@ class GameDomainCompatibilityTests(unittest.TestCase):
             "pop_night_reports",
             "add_night_report_line",
             "queue_last_words",
+            "queue_last_word_for_day",
+            "pop_last_words_for_day",
             "can_send_last_word",
             "consume_last_word",
             "set_day_vote",
@@ -177,6 +179,20 @@ class GameDomainCompatibilityTests(unittest.TestCase):
         self.assertIn(ROLE_MAFIA, assigned_roles)
         self.assertIn(ROLE_CITIZEN, assigned_roles)
         self.assertIsNotNone(room.started_at)
+
+    def test_last_word_is_queued_until_day_release(self) -> None:
+        room = GameRoom(chat_id=123, host_id=456)
+        room.queue_last_word_for_day(10, "сообщение игрока 10")
+        room.queue_last_word_for_day(20, "сообщение игрока 20")
+
+        self.assertEqual(
+            room.pop_last_words_for_day(),
+            {
+                10: "сообщение игрока 10",
+                20: "сообщение игрока 20",
+            },
+        )
+        self.assertEqual(room.pop_last_words_for_day(), {})
 
     def test_day_nomination_flow(self) -> None:
         room = GameRoom(chat_id=123, host_id=456)
