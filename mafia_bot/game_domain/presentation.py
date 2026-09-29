@@ -69,8 +69,25 @@ def queue_last_words(self, players) -> list[int]:
         if player.user_id in self.pending_last_words:
             continue
         self.pending_last_words.add(player.user_id)
+        self.last_word_death_nights[player.user_id] = int(self.round_no)
         queued.append(player.user_id)
     return queued
+
+
+def last_word_public_text(self, player, text: str) -> str:
+    death_night = self.last_word_death_nights.get(player.user_id)
+    name_link = self.public_player_mark(player)
+    safe_text = escape(text)
+    if death_night is not None:
+        return (
+            f"Кто-то из жителей слышал, как {name_link} кричал перед смертью "
+            f"в ночь №{death_night}:\n"
+            f"<b>{safe_text}</b>"
+        )
+    return (
+        f"Кто-то из жителей слышал, как {name_link} кричал перед смертью:\n"
+        f"<b>{safe_text}</b>"
+    )
 
 
 def can_send_last_word(self, user_id: int) -> bool:
