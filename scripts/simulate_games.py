@@ -14,8 +14,14 @@ from __future__ import annotations
 
 import argparse
 import random
+import sys
 from dataclasses import dataclass
 from pathlib import Path
+
+# When executed as `python scripts/simulate_games.py`, Python puts the
+# scripts directory first on sys.path. Add the repository root so the
+# simulator can import the real `mafia_bot` package.
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from mafia_bot.game_domain import (
     DAY_STAGE_DISCUSSION,
