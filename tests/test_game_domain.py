@@ -106,6 +106,9 @@ class GameDomainCompatibilityTests(unittest.TestCase):
             "all_alive_trial_voted",
             "start_day_discussion",
             "start_day_nomination",
+            "start_day_trial",
+            "resolve_day_nomination",
+            "_reset_for_night_transition",
             "set_trial_vote",
             "trial_vote_counts",
             "end_day_no_lynch",
@@ -158,6 +161,18 @@ class GameDomainCompatibilityTests(unittest.TestCase):
         self.assertEqual(room.seat_number(20), 2)
         self.assertIsNone(room.seat_number(999))
         self.assertEqual(room.anonymous_player_label(room.players[10]), "Невидимка")
+
+    def test_room_starts_empty_and_can_open_registration(self) -> None:
+        room = GameRoom(chat_id=123, host_id=456)
+        self.assertEqual(room.players, {})
+        self.assertFalse(room.registration_open)
+
+        room.open_registration()
+        added, message = room.add_player(1, "Alice")
+
+        self.assertTrue(added)
+        self.assertEqual(message, "Игрок добавлен.")
+        self.assertIsInstance(room.get_player(1), Player)
 
     def test_role_plan_keeps_expected_size(self) -> None:
         for player_count, roles in ROLE_PLAN_BY_COUNT.items():
