@@ -498,7 +498,8 @@ async def start_phase_timer(
 
 
 async def restore_runtime_state(bot: Bot) -> None:
-    for room in storage.rooms.values():
+    # Expired registration can remove a room while recovery is in progress.
+    for room in list(storage.rooms.values()):
         apply_room_settings(room, room.settings)
         if not room.started and room.registration_open:
             remaining = registration_remaining_seconds(room)
