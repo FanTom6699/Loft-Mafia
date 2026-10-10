@@ -13,8 +13,9 @@ from . import settings as _settings
 from . import tickets as _tickets
 from . import night as _night
 from . import callbacks as _callbacks
+from . import test_game as _test_game
 
-_modules = [_common, _lobby, _game, _day, _profile, _settings, _tickets, _night, _callbacks]
+_modules = [_common, _lobby, _game, _day, _profile, _settings, _tickets, _night, _callbacks, _test_game]
 _shared = {}
 for _module in _modules:
     for _name, _value in vars(_module).items():
