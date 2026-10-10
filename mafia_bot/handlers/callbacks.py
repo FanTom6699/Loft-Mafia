@@ -1,9 +1,24 @@
 # Extracted from mafia_bot/handlers.py.
 # Refactor only: gameplay behavior is unchanged.
 from ._context import *  # noqa: F401,F403
+from .night_guard import guarded_night_callback
 
 @router.callback_query(F.data.startswith("noop:"))
 async def on_noop_callback(callback: CallbackQuery) -> None:
+    if (callback.data or "").startswith("noop:skip:"):
+        try:
+            chat_id = int(callback.data.split(":", 2)[2])
+        except ValueError:
+            pass
+        else:
+            await guarded_night_callback(
+                callback, chat_id, _on_noop_callback, storage, get_phase_lock, maybe_finish_phase_early
+            )
+            return
+    await _on_noop_callback(callback)
+
+
+async def _on_noop_callback(callback: CallbackQuery) -> None:
     if callback.data == "noop:actionhint":
         await callback.answer("Открой ЛС бота: меню хода придет автоматически по фазе.", show_alert=True)
         return
@@ -21,6 +36,10 @@ async def on_noop_callback(callback: CallbackQuery) -> None:
         room = storage.get_room(chat_id)
         if room is None or room.phase != PHASE_NIGHT:
             await callback.answer("🚷 Сейчас нельзя пропустить ход.", show_alert=True)
+            return
+        menu_id = action_menu_messages.get(chat_id, {}).get(callback.from_user.id)
+        if menu_id is not None and callback.message.message_id != menu_id:
+            await callback.answer("Это меню уже устарело. Используй текущий ночной ход.", show_alert=True)
             return
         if callback.message.chat.type != "private":
             await callback.answer("🚷 Пропуск ночного хода доступен только в ЛС бота.", show_alert=True)

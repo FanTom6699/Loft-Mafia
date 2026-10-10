@@ -1,6 +1,7 @@
 # Extracted from mafia_bot/handlers.py.
 # Refactor only: gameplay behavior is unchanged.
 from ._context import *  # noqa: F401,F403
+from .night_guard import defer_night_finish
 
 def get_phase_lock(chat_id: int) -> asyncio.Lock:
     lock = phase_locks.get(chat_id)
@@ -556,6 +557,9 @@ async def restore_runtime_state(bot: Bot) -> None:
 
 
 async def maybe_finish_phase_early(bot: Bot, room) -> None:
+    if room.phase == "night" and defer_night_finish(room):
+        return
+
     if room.phase == "night" and room.all_required_night_actions_done():
         await process_night_end(bot, room.chat_id, timer_reason=None)
         return

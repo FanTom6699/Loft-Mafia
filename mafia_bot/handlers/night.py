@@ -1,6 +1,7 @@
 # Extracted from mafia_bot/handlers.py.
 # Refactor only: gameplay behavior is unchanged.
 from ._context import *  # noqa: F401,F403
+from .night_guard import guarded_night_callback
 
 async def night_action_keyboard(bot: Bot) -> InlineKeyboardMarkup:
     link = await private_bot_link(bot)
@@ -510,14 +511,24 @@ def city_power_allies_text(room, role: str) -> str:
     return "\n\n<b>Запомни своих союзников:</b>\n" + "\n".join(lines)
 
 
-@router.message(Command("action"))
-async def cmd_action(message: Message) -> None:
-    await cleanup_group_command_message(message)
-    await message.answer("Меню хода отправляется автоматически при старте каждой фазы.")
-
-
 @router.callback_query(F.data.startswith("act:"))
 async def on_action_callback(callback: CallbackQuery) -> None:
+    parts = (callback.data or "").split(":")
+    night_actions = {"kill", "heal", "commode", "check", "cshot", "advocate", "maniac", "mistress", "bum", "kamikaze"}
+    if len(parts) == 4 and parts[1] in night_actions:
+        try:
+            chat_id = int(parts[2])
+        except ValueError:
+            pass
+        else:
+            await guarded_night_callback(
+                callback, chat_id, _on_action_callback, storage, get_phase_lock, maybe_finish_phase_early
+            )
+            return
+    await _on_action_callback(callback)
+
+
+async def _on_action_callback(callback: CallbackQuery) -> None:
     if callback.message is None or callback.from_user is None:
         return
 
@@ -542,6 +553,12 @@ async def on_action_callback(callback: CallbackQuery) -> None:
     if room is None:
         await callback.answer("Игра не найдена. Дождись следующей партии.", show_alert=True)
         return
+
+    if action not in {"vote", "skipvote"}:
+        menu_id = action_menu_messages.get(chat_id, {}).get(callback.from_user.id)
+        if menu_id is not None and callback.message.message_id != menu_id:
+            await callback.answer("Это меню уже устарело. Используй текущий ночной ход.", show_alert=True)
+            return
 
     actor = room.get_player(callback.from_user.id)
     if actor is None:
@@ -655,6 +672,9 @@ async def on_action_callback(callback: CallbackQuery) -> None:
         mode = "check" if target_id == 1 else "shoot" if target_id == 2 else None
         if mode is None:
             await callback.answer("Некорректный выбор действия.", show_alert=True)
+            return
+        if room.commissar_action_mode == mode:
+            await callback.answer("Режим уже выбран.")
             return
         ok, info = room.set_commissar_action_mode(callback.from_user.id, mode)
         await callback.answer(info, show_alert=not ok)

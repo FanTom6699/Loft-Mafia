@@ -625,12 +625,6 @@ async def cmd_create(message: Message) -> None:
     await start_registration_timer(room, message.bot, int(room_chat_settings(room)["timings"]["registration"]))
 
 
-@router.message(Command("join"))
-async def cmd_join(message: Message) -> None:
-    await cleanup_group_command_message(message)
-    await message.answer("Вход в лобби только через inline-кнопку Зарегистрироваться под постом лобби.")
-
-
 @router.message(Command("leave"))
 async def cmd_leave(message: Message) -> None:
     await cleanup_group_command_message(message)
@@ -694,17 +688,6 @@ async def cmd_leave(message: Message) -> None:
 
         persist_room(room)
         return
-
-
-@router.message(Command("lobby"))
-async def cmd_lobby(message: Message) -> None:
-    await cleanup_group_command_message(message)
-    room = storage.get_room(message.chat.id)
-    if room is None:
-        await message.answer(MSG_LOBBY_NOT_FOUND)
-        return
-
-    await message.answer(room.lobby_text(), parse_mode="HTML")
 
 
 @router.message(Command("extend"))
@@ -1000,31 +983,3 @@ async def on_registration_action(callback: CallbackQuery) -> None:
         return
 
     await callback.answer("Неизвестное действие", show_alert=True)
-
-
-@router.message(Command("status"))
-async def cmd_status(message: Message) -> None:
-    await cleanup_group_command_message(message)
-    room = storage.get_room(message.chat.id)
-    if room is None:
-        await message.answer(MSG_LOBBY_NOT_FOUND)
-        return
-
-    await message.answer(room.status_text(), parse_mode="HTML")
-
-
-@router.message(Command("id"))
-async def cmd_id(message: Message) -> None:
-    await cleanup_group_command_message(message)
-
-    replied = message.reply_to_message
-    if replied is not None and replied.from_user is not None:
-        name = escape(user_nickname(replied.from_user))
-        await message.answer(f"ID {name}: <code>{replied.from_user.id}</code>")
-        return
-
-    if message.from_user is not None:
-        await message.answer(f"Твой ID: <code>{message.from_user.id}</code>")
-        return
-
-    await message.answer("Не удалось определить ID.")

@@ -865,22 +865,6 @@ async def announce_commissar_transfer(room, bot: Bot, commissar_successor_id: in
         pass
 
 
-@router.message(Command("panel"))
-async def cmd_panel(message: Message) -> None:
-    await cleanup_group_command_message(message)
-    if message.chat.type == "private":
-        await message.answer("Панель доступна в групповом чате.")
-        return
-
-    sent = await message.answer("Панель регистрации:")
-    registration_panel_message_ids[message.chat.id] = sent.message_id
-    await message.bot.edit_message_reply_markup(
-        chat_id=message.chat.id,
-        message_id=sent.message_id,
-        reply_markup=registration_panel(sent.message_id),
-    )
-
-
 @router.message(
     F.chat.type.in_({"group", "supergroup"}),
     F.from_user.id == OWNER_USER_ID,
