@@ -72,6 +72,7 @@ def open_registration(self) -> None:
     self.pending_last_words.clear()
     self.used_last_words.clear()
     self.last_words_log.clear()
+    self.last_word_death_nights.clear()
     self.phase_started_at = None
     self.phase_duration_seconds = None
     self.stats_recorded = False

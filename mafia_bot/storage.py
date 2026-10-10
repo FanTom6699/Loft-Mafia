@@ -189,6 +189,9 @@ class GameStateRepository:
             "pending_last_words": sorted(room.pending_last_words),
             "used_last_words": sorted(room.used_last_words),
             "last_words_log": room.last_words_log,
+            "last_word_death_nights": room.last_word_death_nights,
+            "pending_last_words_public": room.pending_last_words_public,
+            "last_doctor_saved_target_id": room.last_doctor_saved_target_id,
             "phase_started_at": GameStateRepository._dt_to_str(room.phase_started_at),
             "phase_duration_seconds": room.phase_duration_seconds,
             "stats_recorded": room.stats_recorded,
@@ -296,6 +299,13 @@ class GameStateRepository:
         room.pending_last_words = {int(v) for v in payload.get("pending_last_words", [])}
         room.used_last_words = {int(v) for v in payload.get("used_last_words", [])}
         room.last_words_log = {int(k): str(v) for k, v in payload.get("last_words_log", {}).items()}
+        room.last_word_death_nights = {
+            int(k): int(v) for k, v in payload.get("last_word_death_nights", {}).items()
+        }
+        room.pending_last_words_public = {
+            int(k): str(v) for k, v in payload.get("pending_last_words_public", {}).items()
+        }
+        room.last_doctor_saved_target_id = payload.get("last_doctor_saved_target_id")
         room.phase_started_at = GameStateRepository._str_to_dt(payload.get("phase_started_at"))
         phase_duration = payload.get("phase_duration_seconds")
         room.phase_duration_seconds = int(phase_duration) if phase_duration is not None else None
@@ -327,9 +337,9 @@ class GameStateRepository:
         win_money = 10
         with sqlite3.connect(self.db_path) as conn:
             for player in room.players.values():
-                won = self._did_player_win(player.role, room.winner_team, player.alive)
-                survived = 1 if player.alive else 0
                 suicide_personal_win = 1 if player.user_id in room.suicide_winners else 0
+                won = self._did_player_win(player.role, room.winner_team, player.alive) or bool(suicide_personal_win)
+                survived = 1 if player.alive else 0
                 mafia_game = 1 if player.role in MAFIA_ROLES or player.role == ROLE_ADVOCATE else 0
                 maniac_game = 1 if player.role == ROLE_MANIAC else 0
                 civilian_game = (
