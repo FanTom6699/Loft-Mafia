@@ -7,6 +7,7 @@ from html import escape
 import random
 
 from .constants import (
+    MAFIA_ROLES,
     DAY_STAGE_NOMINATION,
     PHASE_DAY,
     PHASE_FINISHED,
