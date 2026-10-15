@@ -203,6 +203,7 @@ async def on_top_callback(callback: CallbackQuery) -> None:
         return
 
     parts = callback.data.split(":")
+    chat_id = callback.message.chat.id if callback.message.chat.type in {"group", "supergroup"} else None
     if len(parts) == 2:
         metric = "wins"
         period = parts[1]
@@ -210,10 +211,12 @@ async def on_top_callback(callback: CallbackQuery) -> None:
     elif len(parts) == 3:
         _, metric, period = parts
         owner_user_id = None
-    elif len(parts) == 4:
-        _, metric, period, owner_raw = parts
+    elif len(parts) in {4, 5}:
+        _, metric, period, owner_raw = parts[:4]
         try:
             owner_user_id = int(owner_raw)
+            if len(parts) == 5 and chat_id is None:
+                chat_id = int(parts[4])
         except ValueError:
             await callback.answer("Неизвестный топ.", show_alert=True)
             return
@@ -228,7 +231,7 @@ async def on_top_callback(callback: CallbackQuery) -> None:
     if callback.message.chat.type in {"group", "supergroup"} and callback.from_user is not None:
         room = storage.get_room(callback.message.chat.id)
         if room is not None and room.started and room.phase != PHASE_FINISHED:
-            sent = await send_top_to_private(callback.message.bot, callback.from_user, metric="wins", period="all")
+            sent = await send_top_to_private(callback.message.bot, callback.from_user, metric="wins", period="all", chat_id=chat_id)
             if sent:
                 await callback.answer("Во время игры топ отправлен в ЛС бота.", show_alert=True)
             else:
@@ -245,14 +248,16 @@ async def on_top_callback(callback: CallbackQuery) -> None:
     if metric == "tickets":
         period = "all"
 
-    rows = repo.get_top_players(period=period, limit=10, metric=metric)
+    if chat_id is not None:
+        metric = "wins"
+    rows = repo.get_top_players(period=period, limit=10, metric=metric, chat_id=chat_id)
     try:
         keyboard_owner_id = owner_user_id
         if keyboard_owner_id is None and callback.from_user is not None:
             keyboard_owner_id = callback.from_user.id
         await callback.message.edit_text(
             format_top_text(metric, period, rows),
-            reply_markup=top_period_keyboard(metric, period, owner_user_id=keyboard_owner_id),
+            reply_markup=top_period_keyboard(metric, period, owner_user_id=keyboard_owner_id, chat_id=chat_id),
             parse_mode="HTML",
         )
     except TelegramBadRequest as e:

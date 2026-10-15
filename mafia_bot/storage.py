@@ -84,6 +84,7 @@ class GameStateRepository:
                 ON player_game_results(user_id, finished_at)
                 """
             )
+            self._ensure_column(conn, "player_game_results", "chat_id", "INTEGER")
             self._ensure_column(conn, "player_stats", "money", "INTEGER NOT NULL DEFAULT 0")
             self._ensure_column(conn, "player_stats", "tickets", "INTEGER NOT NULL DEFAULT 0")
             self._ensure_column(conn, "player_stats", "buff_documents", "INTEGER NOT NULL DEFAULT 0")
@@ -403,6 +404,7 @@ class GameStateRepository:
                 conn.execute(
                     """
                     INSERT INTO player_game_results(
+                        chat_id,
                         user_id,
                         display_name,
                         won,
@@ -411,9 +413,10 @@ class GameStateRepository:
                         winner_team,
                         finished_at
                     )
-                    VALUES(?, ?, ?, ?, ?, ?, ?)
+                    VALUES(?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
+                        room.chat_id,
                         player.user_id,
                         player.full_name,
                         1 if won else 0,
@@ -436,11 +439,27 @@ class GameStateRepository:
             return (now - timedelta(days=30)).isoformat()
         return None
 
-    def get_top_players(self, period: str = "all", limit: int = 10, metric: str = "wins") -> list[dict]:
+    def get_top_players(self, period: str = "all", limit: int = 10, metric: str = "wins", chat_id: int | None = None) -> list[dict]:
         normalized_period = period if period in {"day", "week", "month", "all"} else "all"
         normalized_metric = metric if metric in {"wins", "tickets"} else "wins"
         with sqlite3.connect(self.db_path) as conn:
             conn.row_factory = sqlite3.Row
+            if chat_id is not None:
+                since = self._top_period_since(normalized_period)
+                rows = conn.execute(
+                    """
+                    SELECT user_id, MAX(display_name) AS display_name,
+                           COUNT(*) AS games_played, SUM(won) AS wins,
+                           SUM(CASE WHEN won = 0 THEN 1 ELSE 0 END) AS losses,
+                           SUM(survived) AS survived_games
+                    FROM player_game_results
+                    WHERE chat_id = ? AND (? IS NULL OR finished_at >= ?)
+                    GROUP BY user_id
+                    ORDER BY wins DESC, games_played DESC, survived_games DESC, user_id ASC
+                    LIMIT ?
+                    """, (chat_id, since, since, limit),
+                ).fetchall()
+                return [dict(row) for row in rows]
             if normalized_metric == "tickets":
                 rows = conn.execute(
                     """

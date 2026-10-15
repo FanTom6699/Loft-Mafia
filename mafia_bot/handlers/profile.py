@@ -37,8 +37,10 @@ def format_player_stats_text(stats: dict) -> str:
     )
 
 
-def top_period_keyboard(selected_metric: str, selected_period: str, owner_user_id: int | None = None) -> InlineKeyboardMarkup:
+def top_period_keyboard(selected_metric: str, selected_period: str, owner_user_id: int | None = None, chat_id: int | None = None) -> InlineKeyboardMarkup:
     def callback_value(metric: str, period: str) -> str:
+        if chat_id is not None:
+            return f"top:{metric}:{period}:{owner_user_id or 0}:{chat_id}"
         if owner_user_id is None:
             return f"top:{metric}:{period}"
         return f"top:{metric}:{period}:{owner_user_id}"
@@ -56,13 +58,12 @@ def top_period_keyboard(selected_metric: str, selected_period: str, owner_user_i
         inline_keyboard=[
             [button("day"), button("week")],
             [button("month"), button("all")],
-            [
+        ] + ([] if chat_id is not None else [[
                 InlineKeyboardButton(
                     text=f"{ticket_prefix}По билетикам",
                     callback_data=callback_value("tickets", "all"),
                 )
-            ],
-        ]
+            ]])
     )
 
 
@@ -305,10 +306,10 @@ async def cmd_stats(message: Message) -> None:
     await message.answer(format_player_stats_text(stats))
 
 
-async def send_top_to_private(bot: Bot, user: User, metric: str = "wins", period: str = "all") -> bool:
+async def send_top_to_private(bot: Bot, user: User, metric: str = "wins", period: str = "all", chat_id: int | None = None) -> bool:
     nickname = user_nickname(user)
     repo.touch_private_user(user.id, nickname, user.username)
-    top_rows = repo.get_top_players(period=period, limit=10, metric=metric)
+    top_rows = repo.get_top_players(period=period, limit=10, metric=metric, chat_id=chat_id)
     try:
         await bot.send_message(
             user.id,
@@ -321,7 +322,7 @@ async def send_top_to_private(bot: Bot, user: User, metric: str = "wins", period
         await bot.send_message(
             user.id,
             format_top_text(metric, period, top_rows),
-            reply_markup=top_period_keyboard(metric, period, owner_user_id=user.id),
+            reply_markup=top_period_keyboard(metric, period, owner_user_id=user.id, chat_id=chat_id),
             parse_mode="HTML",
         )
     except TelegramForbiddenError:
@@ -338,12 +339,12 @@ async def cmd_top(message: Message) -> None:
     if message.chat.type in {"group", "supergroup"} and message.from_user is not None:
         room = storage.get_room(message.chat.id)
         if room is not None and room.started and room.phase != PHASE_FINISHED:
-            sent = await send_top_to_private(message.bot, message.from_user, metric=metric, period=period)
+            sent = await send_top_to_private(message.bot, message.from_user, metric=metric, period=period, chat_id=message.chat.id)
             if sent:
                 return
             else:
                 start_link = await bot_start_link(message.bot)
-                await message.answer(
+                notice = await message.answer(
                     "Во время игры топ доступен только в ЛС бота. Напиши боту /start и попробуй снова.",
                     reply_markup=InlineKeyboardMarkup(
                         inline_keyboard=[
@@ -351,12 +352,14 @@ async def cmd_top(message: Message) -> None:
                         ]
                     ),
                 )
+                asyncio.create_task(delete_message_later(notice, 15))
             return
 
-    top_rows = repo.get_top_players(period=period, limit=10, metric=metric)
+    chat_id = message.chat.id if message.chat.type in {"group", "supergroup"} else None
+    top_rows = repo.get_top_players(period=period, limit=10, metric=metric, chat_id=chat_id)
     await message.answer(
         format_top_text(metric, period, top_rows),
-        reply_markup=top_period_keyboard(metric, period, owner_user_id=message.from_user.id if message.from_user is not None else None),
+        reply_markup=top_period_keyboard(metric, period, owner_user_id=message.from_user.id if message.from_user is not None else None, chat_id=chat_id),
         parse_mode="HTML",
     )
 

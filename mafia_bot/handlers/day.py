@@ -134,6 +134,9 @@ async def on_trial_callback(callback: CallbackQuery) -> None:
                 if info == MISTRESS_DAY_BLOCK_TOAST:
                     await callback.answer(MISTRESS_DAY_BLOCK_TOAST)
                     return
+                if callback.from_user.id == room.trial_candidate_id:
+                    await callback.answer("Ты не можешь голосовать за себя", show_alert=False)
+                    return
                 await callback.answer(info, show_alert=True)
                 return
 

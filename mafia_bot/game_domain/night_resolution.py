@@ -101,6 +101,9 @@ def resolve_night(self) -> tuple[bool, str, list[Player], str | None, int | None
     )
     mafia_votes = self._active_mafia_votes(mafia_blocked_by_mistress)
     mafia_target_id = self._choose_mafia_target(mafia_votes)
+    if mafia_target_id is None and self.alive_mafia():
+        for mafia_player in self.alive_mafia():
+            self.add_night_report_line(mafia_player.user_id, "Мафия не смогла определиться")
 
     maniac = next((p for p in self.alive_players() if p.role == ROLE_MANIAC), None)
     maniac_target_id: int | None = None

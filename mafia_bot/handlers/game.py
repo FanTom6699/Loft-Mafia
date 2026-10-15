@@ -174,14 +174,15 @@ async def process_night_end(bot: Bot, chat_id: int, timer_reason: str | None = N
 
         room.afk_killed_user_ids.clear()
 
-        day_summary = (
-            room.alive_players_text()
-            + "\n\n"
-            + room.alive_role_hints_text()
-            + "\n\n"
-            + "Сейчас самое время обсудить результаты ночи, разобраться в причинах и следствиях..."
-        )
-        await bot.send_message(chat_id, day_summary, parse_mode="HTML")
+        if room.phase != PHASE_FINISHED:
+            day_summary = (
+                room.alive_players_text()
+                + "\n\n"
+                + room.alive_role_hints_text()
+                + "\n\n"
+                + "Сейчас самое время обсудить результаты ночи, разобраться в причинах и следствиях..."
+            )
+            await bot.send_message(chat_id, day_summary, parse_mode="HTML")
 
         if room.phase == PHASE_DAY and room.day_stage == DAY_STAGE_DISCUSSION:
             delayed_last_words = room.pop_last_words_for_day()

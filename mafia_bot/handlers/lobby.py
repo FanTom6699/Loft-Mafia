@@ -1,6 +1,24 @@
 # Extracted from mafia_bot/handlers.py.
 # Refactor only: gameplay behavior is unchanged.
 from ._context import *  # noqa: F401,F403
+from mafia_bot.game_domain.roles import player_link
+
+
+async def registration_write_blocked(bot: Bot, chat_id: int, user_id: int) -> bool:
+    blocked = is_user_blocked(chat_id, user_id)
+    if not blocked:
+        try:
+            member = await bot.get_chat_member(chat_id, user_id)
+        except Exception:
+            await safe_send_message(bot, user_id, "Не удалось проверить доступ к чату. Попробуйте зарегистрироваться позже.")
+            return True
+        blocked = member.status == "restricted" and not member.can_send_messages
+    if blocked:
+        await safe_send_message(
+            bot, user_id,
+            "Не удалось присоединиться к игре\nВы не можете писать в этом чате",
+        )
+    return blocked
 
 def registration_remaining_seconds(room) -> int:
     if room.phase_started_at is None or room.phase_duration_seconds is None:
@@ -453,8 +471,7 @@ async def cmd_start(message: Message, command: CommandObject) -> None:
             await message.answer("Регистрация не найдена или уже завершена.")
             return
 
-        if is_user_blocked(chat_id, message.from_user.id):
-            await notify_registration_blocked(message.bot, chat_id, message.from_user.id)
+        if await registration_write_blocked(message.bot, chat_id, message.from_user.id):
             return
 
         if not room.registration_open or room.started:
@@ -627,6 +644,11 @@ async def cmd_create(message: Message) -> None:
 
 @router.message(Command("leave"))
 async def cmd_leave(message: Message) -> None:
+    async with get_phase_lock(message.chat.id):
+        await _cmd_leave_locked(message)
+
+
+async def _cmd_leave_locked(message: Message) -> None:
     await cleanup_group_command_message(message)
     room = storage.get_room(message.chat.id)
     if room is None:
@@ -650,6 +672,16 @@ async def cmd_leave(message: Message) -> None:
         commissar_transfer_note = None
         commissar_successor_id = None
 
+        leaving_trial = (
+            room.phase == PHASE_DAY
+            and room.day_stage == DAY_STAGE_TRIAL
+            and room.trial_candidate_id == player.user_id
+        )
+        if leaving_trial:
+            cancel_phase_timer(room.chat_id)
+            yes_count, no_count = room.trial_vote_counts()
+            await finish_trial_vote_message(message.bot, room, player, yes_count, no_count)
+
         player.alive = False
         if room.phase == PHASE_DAY and player.role == ROLE_DON:
             don_transfer_result = room.transfer_don_if_needed("выхода Дона из игры")
@@ -660,11 +692,22 @@ async def cmd_leave(message: Message) -> None:
             if commissar_transfer_result is not None:
                 commissar_transfer_note, commissar_successor_id = commissar_transfer_result
 
+        if leaving_trial:
+            # Voluntary exit does not trigger lynch-only role rewards.
+            room._reset_for_night_transition()
         room.check_winner()
+        if leaving_trial and room.phase != PHASE_FINISHED:
+            room.phase = PHASE_NIGHT
+            room.round_no += 1
         persist_room(room)
 
         leave_text = f"{room_player_mark(room, player)} не выдержал гнетущей атмосферы этого города и повесился."
-        if show_roles_enabled(room):
+        if leaving_trial:
+            leave_text = (
+                "<b>Голосование окончено.</b>\n"
+                f"Подсудимый {player_link(player)} не дождался решения суда и сам исполнил приговор."
+            )
+        elif show_roles_enabled(room):
             leave_text += f"\nОн был {role_mark_text(player.role)}"
         await message.answer(leave_text, parse_mode="HTML")
 
@@ -685,6 +728,17 @@ async def cmd_leave(message: Message) -> None:
                 await send_endgame_currency_summaries(message.bot, room)
             await message.answer(room.final_report_text(), parse_mode="HTML")
             cancel_phase_timer(message.chat.id)
+
+        elif leaving_trial:
+            keyboard = await night_action_keyboard(message.bot)
+            await send_phase_media(
+                message.bot, room.chat_id, room.night_media_caption(),
+                NIGHT_IMAGE_PATH, reply_markup=keyboard,
+            )
+            await safe_send_message(message.bot, room.chat_id, night_status_text(room), reply_markup=keyboard)
+            await push_phase_action_menus(message.bot, room)
+            await push_kamikaze_revenge_menu(message.bot, room)
+            await start_phase_timer(room, message.bot)
 
         persist_room(room)
         return
@@ -858,9 +912,8 @@ async def on_registration_action(callback: CallbackQuery) -> None:
                 show_alert=True,
             )
             return
-        if is_user_blocked(chat_id, callback.from_user.id):
-            await notify_registration_blocked(callback.bot, chat_id, callback.from_user.id)
-            await callback.answer("Пока действует мут, регистрация недоступна.", show_alert=True)
+        if await registration_write_blocked(callback.bot, chat_id, callback.from_user.id):
+            await callback.answer("Регистрация недоступна. Подробности в ЛС.", show_alert=False)
             return
         if room is None:
             await callback.answer("Сначала создай лобби через /game.", show_alert=True)

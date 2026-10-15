@@ -682,6 +682,29 @@ async def bot_has_delete_permission(bot: Bot, chat_id: int) -> bool:
     return bool(getattr(member, "can_delete_messages", False))
 
 
+async def process_outsider_violation(message: Message) -> None:
+    if message.from_user is None:
+        return
+    state = get_or_create_penalty(message.chat.id, message.from_user.id)
+    state["blocked_until"] = time.time() + 60
+    try:
+        await message.bot.restrict_chat_member(
+            chat_id=message.chat.id,
+            user_id=message.from_user.id,
+            permissions=ChatPermissions(can_send_messages=False),
+            until_date=datetime.now() + timedelta(seconds=60),
+        )
+    except Exception:
+        pass
+    await safe_send_message(
+        message.bot,
+        message.from_user.id,
+        "🛑 Ваше сообщение удалено, вы временно заблокированы.\n"
+        "В чат могут писать только участники игры. Ограничение временное. "
+        "Сыграть можно будет после окончания — командой /game.",
+    )
+
+
 async def process_rule_violation(message: Message) -> None:
     if message.from_user is None:
         return
@@ -924,12 +947,21 @@ async def enforce_group_game_rules(message: Message) -> None:
         if await is_group_admin(message.bot, message.chat.id, message.from_user.id) or is_ticket_manager_user_id(message.from_user.id):
             return
 
+    sender = room.get_player(message.from_user.id)
+    if (
+        sender is None
+        and room.phase in {PHASE_DAY, PHASE_NIGHT}
+        and bool(room_chat_settings(room)["mute"]["outsiders"])
+    ):
+        await safe_delete_message(message)
+        await process_outsider_violation(message)
+        return
+
     if is_user_blocked(message.chat.id, message.from_user.id):
         await safe_delete_message(message)
         await process_rule_violation(message)
         return
 
-    sender = room.get_player(message.from_user.id)
     is_participant = sender is not None
     is_alive_player = sender is not None and sender.alive
     is_command = bool(message.text and message.text.startswith("/"))
@@ -975,10 +1007,6 @@ async def enforce_group_game_rules(message: Message) -> None:
                 await safe_delete_message(message)
             return
 
-        # Non-participants still receive regular penalties.
-        if bool(mute_settings["outsiders"]) and not (is_alive_player and is_command):
-            await safe_delete_message(message)
-            await process_rule_violation(message)
         return
 
     if room.phase == PHASE_DAY:
@@ -995,9 +1023,6 @@ async def enforce_group_game_rules(message: Message) -> None:
             return
 
         if not is_participant:
-            if bool(mute_settings["outsiders"]):
-                await safe_delete_message(message)
-                await process_rule_violation(message)
             return
 
         # At day, only alive players can speak in the group chat.

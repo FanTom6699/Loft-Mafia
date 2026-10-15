@@ -61,18 +61,18 @@ def _choose_mafia_target(self, mafia_votes: dict[int, int]) -> int | None:
     if not mafia_votes:
         return None
 
-    unique_targets = set(mafia_votes.values())
-    if len(unique_targets) == 1:
-        return next(iter(unique_targets))
-
-    don = next((p for p in self.alive_mafia() if p.role == ROLE_DON), None)
-    if don is not None and don.user_id in mafia_votes:
-        return mafia_votes[don.user_id]
-
     votes_by_target: dict[int, int] = {}
     for target_id in mafia_votes.values():
         votes_by_target[target_id] = votes_by_target.get(target_id, 0) + 1
-    return max(votes_by_target, key=votes_by_target.get)
+    maximum = max(votes_by_target.values())
+    leaders = [target_id for target_id, count in votes_by_target.items() if count == maximum]
+    if len(leaders) == 1:
+        return leaders[0]
+
+    don = next((p for p in self.alive_mafia() if p.role == ROLE_DON), None)
+    if don is not None:
+        return mafia_votes.get(don.user_id)
+    return None
 
 
 def current_mafia_target_id(self) -> int | None:
